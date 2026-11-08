@@ -1,0 +1,44 @@
+{
+  "title": "Four-way traffic light",
+  "idea": "A traffic-light controller for a crossroads, drawn live, that must never let crossing roads go at once.",
+  "brief": "Build a controller for a crossroads with two axes: north-south (NS) and east-west (EW). Each axis shows red, yellow or green.\n\nFiles (write them with write_file):\n- public/controller.js: the controller, plain JavaScript, no import/export. Make it work both in a browser (attach to globalThis.TrafficController) and in Bun (module.exports). API: createController({ now }) where `now()` returns milliseconds and is the ONLY source of time. It returns { state(), emergency(axis), clear(), fault(), recover() }. state() returns { ns, ew } with each one 'red' | 'yellow' | 'green'. Events: emergency('ns'|'ew') holds that axis's green once the cycle reaches it, until clear(); fault() sends both roads to red at the next all-red, until recover(); no event may skip a step of the cycle (green, yellow, red, green), and the lights only move on now() or on an event. The light is a pure function of `now()`; no timers, no Date, no performance.now.\n- public/index.html + public/app.js: draw the intersection (SVG or canvas, classic <script src>, no modules, no network) with both axes' lights, driven by createController({ now: () => Date.now() }) on requestAnimationFrame. Add one button per event next to the speed control, and a speed control that scales the clock you pass in, so a cycle can be watched in seconds.\n- test/*.test.ts: bun tests that `require('../public/controller.js')` and drive a fake clock.\n\nHow to work: call get_brief, then for each law write a test, run it with run_tests, then call plan and check until every law passes. A law that fails today is a finding about your code, not something to weaken. Reload the Preview after writing public/ files.",
+  "panels": [
+    "brief",
+    "preview",
+    "laws",
+    "checks",
+    "files",
+    "activity"
+  ],
+  "writable": [
+    "public",
+    "test",
+    ".verdict"
+  ],
+  "main": {
+    "label": "Correct",
+    "note": "The controller as the laws describe it: a six-phase cycle, with events that never skip a step."
+  },
+  "versions": [
+    {
+      "id": "crossing-bug",
+      "label": "Crossing bug",
+      "note": "NS yellow shows EW green, so crossing roads go at once."
+    },
+    {
+      "id": "no-all-red",
+      "label": "No all-red gap",
+      "note": "Yellow hands straight over to the other road's green: the all-red phases last 0 ms."
+    },
+    {
+      "id": "skips-yellow",
+      "label": "Skips yellow",
+      "note": "Green drops straight to red; the yellow phases show red."
+    },
+    {
+      "id": "real-clock",
+      "label": "Real clock",
+      "note": "Falls back to Date.now() when no clock is passed in."
+    }
+  ]
+}

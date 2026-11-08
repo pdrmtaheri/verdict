@@ -18,7 +18,10 @@ export interface LawReport {
 }
 
 export interface CheckOptions {
-  sandbox?: { readable: string[] };
+  sandbox?: { readable: string[]; writable?: string[] };
+  // Check this folder of code instead of the law's directory (see Context.target).
+  target?: string;
+  exclude?: string[]; // paths inside the target that are not part of the code under check
   // Replay the break of an enforcer that passes but whose inputs changed
   // since it was proven (default). `plan` replays every break itself.
   replay?: boolean;
@@ -31,7 +34,7 @@ export async function checkLaw(w: Where, entry: LockEntry, opts: CheckOptions = 
   const details: LawReport["details"] = [];
   const breaks = opts.hash ? readBreaks(w.dir, opts.hash) : [];
   const run = async (e: Enforcer) => {
-    let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, name: e.name, rule: e.rule, scope: e.scope, sandbox: opts.sandbox });
+    let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, name: e.name, rule: e.rule, scope: e.scope, sandbox: opts.sandbox, target: opts.target, exclude: opts.exclude });
     const warnings: string[] = [...(result.warnings ?? [])];
     if (opts.replay !== false && result.status === "pass") result = await guard(w, entry.law, e, breakFor(breaks, e, entry.enforcers), result, warnings);
     details.push({ id: enforcerId(e), kind: e.kind, path: e.path, result, scope: e.scope ?? scopeOf(w.dir, e.path), warnings });

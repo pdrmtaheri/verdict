@@ -1,0 +1,38 @@
+"50958242":
+  law: Both roads get a green in every full cycle; neither waits forever.
+  enforcers:
+    - test: .verdict/green-each-cycle.test.ts
+f6ac1354:
+  law: "Crossing roads are never allowed to go at once: north-south and east-west
+    are never both green or yellow at the same instant."
+  enforcers:
+    - test: .verdict/no-cross-go.test.ts
+8afcc907:
+  law: Every light changes in the order green, yellow, red, green. It never skips
+    yellow, and it never goes from red to yellow.
+  enforcers:
+    - test: .verdict/light-order.test.ts
+6deb474c:
+  law: Between one road going red and the other going green there is a moment when
+    both are red, so a car that ran the yellow has time to clear.
+  enforcers:
+    - test: .verdict/all-red-gap.test.ts
+"01404813":
+  law: The controller never reads the real clock. Time comes only from the `now`
+    function it is given.
+  enforcers:
+    - semgrep: .verdict/no-real-clock.yaml
+    - test: .verdict/clock-injected.test.ts
+bd08809d:
+  law: The page says each light's state in words, not only by color, so someone
+    who can't tell red from green can still read it.
+  enforcers:
+    - test: .verdict/state-in-words.test.ts
+    - llm: .verdict/state-in-words.llm.md
+8c0f0f47:
+  law: However emergency requests, clears, faults and recoveries are interleaved
+    with the cycle, crossing roads are never both green or yellow in any
+    reachable state.
+  enforcers:
+    - tla: .verdict/interleave.tla
+    - test: .verdict/interleave-replay.test.ts

@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/interleave.tla",
+    "description": "fault mode shows both roads yellow instead of red (state() edit changes a modeled file)",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "if (mode === 'fault') return { ns: 'red', ew: 'red' };",
+        "replace": "if (mode === 'fault') return { ns: 'yellow', ew: 'yellow' };"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/interleave-replay.test.ts",
+    "description": "fault mode shows both roads yellow (flashing-yellow style) instead of red",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "if (mode === 'fault') return { ns: 'red', ew: 'red' };",
+        "replace": "if (mode === 'fault') return { ns: 'yellow', ew: 'yellow' };"
+      }
+    ]
+  }
+]

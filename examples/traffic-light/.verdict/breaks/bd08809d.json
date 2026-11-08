@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/state-in-words.test.ts",
+    "description": "The page stops writing the light states as words: app.js sets the #state readout to an empty string, so only the lamp colors remain.",
+    "edits": [
+      {
+        "path": "public/app.js",
+        "find": "stateEl.textContent = 'NS ' + s.ns + ' · EW ' + s.ew;",
+        "replace": "stateEl.textContent = '';"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/state-in-words.llm.md",
+    "description": "The readout text is painted in the same color as the page background, so the words are invisible.",
+    "edits": [
+      {
+        "path": "public/index.html",
+        "find": ".readout .state { color: var(--muted); font-weight: 400; }",
+        "replace": ".readout .state { color: var(--ground); font-weight: 400; }"
+      }
+    ]
+  }
+]

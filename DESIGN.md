@@ -454,3 +454,14 @@ Gaps in v1:
   validation (Microsoft CCF).
 - JEV-as-a-Judge (arXiv 2609.26550) and JEV vs. LLMs as Rubric Judges
   (arXiv 2609.29769).
+
+## Playground
+
+`verdict playground [dir]` serves a verdict repo with a `PLAYGROUND.json`
+manifest: a localhost web UI and an MCP endpoint (`src/playground/`). It is a
+view and a tool surface over the existing `plan` and `check`, not a new
+mechanism: it adds no trigger, no approval step and nothing to the lock. The
+connected agent's file writes are confined to the manifest's writable
+top-level directories (never `VERDICT.md`, `VERDICT.lock` or the manifest), and
+its tests run through the same OS sandbox as the planner's. Every request needs
+the per-session token and a Host/Origin of the server itself.

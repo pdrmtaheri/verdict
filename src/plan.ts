@@ -75,6 +75,21 @@ Rules
 - Name files ${OUT_DIR}/<short-slug>.<ext>. Other laws are planned at the same
   time; if a name is taken, write_file says so: pick another.
 
+Where the code is
+- The code under check is not always the repo root: verdict can run the same
+  enforcer against another folder of code (a version of the system). It tells
+  the enforcer where through the environment variable VERDICT_TARGET, an
+  absolute path. In a test or script, read the code from there, and fall back to
+  the repo root only when it is unset, for example in a .verdict/ test:
+  const target = process.env.VERDICT_TARGET ?? path.join(__dirname, "..");
+  then require(path.join(target, "src/x.js")) or read files under target.
+  Never find the code relative to the enforcer's own file only. Semgrep rules
+  need nothing: verdict scans the target folder, so paths in a rule are relative
+  to it. Your enforcers must not write into the target; write temp files to the
+  OS temp directory. When VERDICT_EXCLUDE is set it lists paths inside the target
+  (separated by ":") that are not part of the code under check; skip them if you
+  walk the tree.
+
 Every enforcer file states its scope
 - Near the top, a comment line "scope: <what this covers, its bounds and
   assumptions, and what it leaves out>" (a "scope" field in JSON files). A pass

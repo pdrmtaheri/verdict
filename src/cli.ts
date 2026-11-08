@@ -2,6 +2,8 @@
 import { check, exitCode, format, summarize } from "./check.ts";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { validatePlayground } from "./playground/manifest.ts";
+import { describe, discoverPlaygrounds, startPlayground } from "./playground/server.ts";
 import { init } from "./init.ts";
 import { sarif } from "./sarif.ts";
 import { BadLock } from "./lock.ts";
@@ -22,6 +24,12 @@ const USAGE = `usage: verdict <command> [path...]
                          a hash prefix or part of its text (repeatable)
   check   run every law's enforcers; exit 1 if any law fails or isn't planned
           --format sarif  print the report as SARIF (GitHub code scanning)
+  playground [dir] [--port N]
+          serve a playground (a verdict repo with a PLAYGROUND.json), or every
+          playground in a folder: a local web UI plus an MCP endpoint per
+          playground that your coding agent connects to
+  playground validate [dir]
+          check a playground's manifest and laws; exit 1 with what to fix
 
 Laws live in VERDICT.md files: any directory can have one, and its laws apply
 to that directory's subtree. Each keeps its plan in VERDICT.lock and its
@@ -38,6 +46,7 @@ Decision models (jev): TYPESAFE_AI_API_KEY; VERDICT_DECISION_MODEL
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "playground") return playgroundCommand(rest);
   const paths: string[] = [];
   const again: string[] = [];
   let fmt = "text";
@@ -135,6 +144,34 @@ async function run(): Promise<number> {
     console.error(`verdict stopped: ${message}\nIf the message doesn't say how to fix it, run again with VERDICT_DEBUG=1 and report the output at https://github.com/pdrmtaheri/verdict/issues`);
     return 1;
   }
+}
+
+async function playgroundCommand(args: string[]): Promise<number> {
+  const validateOnly = args[0] === "validate";
+  const rest = validateOnly ? args.slice(1) : args;
+  const portAt = rest.indexOf("--port");
+  const port = portAt >= 0 ? Number(rest[portAt + 1]) : undefined;
+  if (portAt >= 0 && (!Number.isInteger(port) || port! < 0 || port! > 65535)) {
+    console.error("--port needs a number from 0 to 65535");
+    return 2;
+  }
+  const dirs = rest.filter((_, i) => portAt < 0 || (i !== portAt && i !== portAt + 1));
+  const root = resolve(dirs[0] ?? process.cwd());
+  // A folder holding one playground, or a folder of playgrounds.
+  const found = discoverPlaygrounds(root);
+  const problems = (found.length > 0 ? found : [root]).flatMap((d) => validatePlayground(d).map((p) => (found.length > 1 ? `${d}: ${p}` : p)));
+  if (problems.length > 0) {
+    for (const p of problems) console.error(p);
+    return 1;
+  }
+  if (validateOnly) {
+    console.log(found.length > 1 ? `${found.length} playgrounds in ${root} are valid` : `${root} is a valid playground`);
+    return 0;
+  }
+  const pg = await startPlayground(root, { port });
+  console.log(describe(pg));
+  await new Promise(() => {}); // serve until interrupted
+  return 0;
 }
 
 process.exit(await run());

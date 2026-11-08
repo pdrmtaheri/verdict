@@ -26,10 +26,15 @@ export async function repoRoot(cwd: string): Promise<string> {
   return real(r.code === 0 && r.output ? r.output.trim() : cwd);
 }
 
-async function lawFiles(repo: string): Promise<string[]> {
+// The VERDICT.md files in the repo, and the directories that are playgrounds
+// (they hold a PLAYGROUND.json). A playground is a world of its own, with its own
+// laws and versions of code: verdict playground runs it, and an outer check or
+// plan leaves it alone unless it's pointed at it.
+async function lawFiles(repo: string): Promise<{ laws: string[]; playgrounds: string[] }> {
   const r = await exec(["git", "ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo });
-  const files = r.code === 0 ? r.output.split("\n") : await Array.fromAsync(new Bun.Glob("**/VERDICT.md").scan({ cwd: repo }));
-  return files.filter((f) => f === "VERDICT.md" || f.endsWith("/VERDICT.md")).map((f) => join(repo, f));
+  const files = r.code === 0 ? r.output.split("\n") : await Array.fromAsync(new Bun.Glob("**/{VERDICT.md,PLAYGROUND.json}").scan({ cwd: repo }));
+  const named = (name: string) => files.filter((f) => f === name || f.endsWith(`/${name}`)).map((f) => join(repo, f));
+  return { laws: named("VERDICT.md"), playgrounds: named("PLAYGROUND.json").map((f) => dirname(f)) };
 }
 
 const under = (p: string, dir: string) => p === dir || p.startsWith(dir + sep);
@@ -38,9 +43,12 @@ const under = (p: string, dir: string) => p === dir || p.startsWith(dir + sep);
 // declared in that subtree), or all of them when no paths are given.
 export async function findSets(cwd: string, paths: string[]): Promise<{ repo: string; sets: LawSet[]; unmatched: string[] }> {
   const repo = await repoRoot(cwd);
-  const all = (await lawFiles(repo)).sort();
+  const found = await lawFiles(repo);
+  const all = found.laws.sort();
   const targets = paths.map((p) => real(resolve(cwd, p)));
-  const chosen = targets.length === 0 ? all : all.filter((f) => targets.some((t) => under(dirname(f), t)));
+  // A playground's laws count only when a path points at the playground or inside it.
+  const apart = (f: string) => found.playgrounds.some((pg) => under(dirname(f), pg) && !targets.some((t) => under(t, pg)));
+  const chosen = (targets.length === 0 ? all : all.filter((f) => targets.some((t) => under(dirname(f), t)))).filter((f) => !apart(f));
   const unmatched = paths.filter((_, i) => !all.some((f) => under(dirname(f), targets[i]!)));
   const sets = chosen.map((lawsFile) => {
     const dir = dirname(lawsFile);

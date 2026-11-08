@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/both-red-moment.test.ts",
+    "description": "Remove the EW-side all-red phase, so after NS yellow EW goes green immediately",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "{ ms: 2000, ns: 'red', ew: 'red' },\n    { ms: 10000, ns: 'red', ew: 'green' },",
+        "replace": "{ ms: 10000, ns: 'red', ew: 'green' },"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/all-red-gap.test.ts",
+    "description": "Remove the NS-side all-red phase, so after EW yellow NS goes green immediately (and the last phase becomes NS green)",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "{ ms: 2000, ns: 'red', ew: 'red' }\n  ];",
+        "replace": "{ ms: 2000, ns: 'green', ew: 'red' }\n  ];"
+      }
+    ]
+  }
+]

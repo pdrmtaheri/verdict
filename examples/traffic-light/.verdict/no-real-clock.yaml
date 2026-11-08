@@ -1,0 +1,24 @@
+# scope: public/controller.js only (the controller). Flags any reference to Date, performance, process.hrtime/hrtime,
+# or Temporal (the real-clock sources in browser and Node), including aliases like `var D = Date`
+# and globalThis.Date. public/app.js is deliberately excluded: it may read the clock and feed it in through `now`.
+# Timers (setTimeout/setInterval) are not clock reads and are not covered.
+rules:
+  - id: controller-reads-real-clock
+    languages: [javascript]
+    severity: ERROR
+    message: The controller must not read the real clock; take time only from the `now` function in opts.
+    paths:
+      exclude:
+        - .verdict
+        - public/app.js
+        - public/index.html
+        - test
+    pattern-either:
+      - pattern: Date
+      - pattern: performance
+      - pattern: $X.performance
+      - pattern: $X.Date
+      - pattern: process.hrtime
+      - pattern: hrtime
+      - pattern: Temporal
+      - pattern: $X.Temporal

@@ -155,6 +155,63 @@ Test files run with:
 
 A missing tool makes that enforcer inconclusive rather than failing the law.
 
+## Playground
+
+An interactive way to try verdict on any idea. A playground is a verdict repo
+with a `PLAYGROUND.json` (title, idea, a brief for the agent). Serve one, or a
+folder of them:
+
+```sh
+verdict playground examples/traffic-light  # one playground; add --port N to pick a port
+verdict playground examples                # every playground in a folder, with links between them
+verdict playground validate <dir>          # check the manifest and laws
+```
+
+It prints a local URL for the web UI and, per playground, a command that
+connects your agent over MCP:
+
+```sh
+claude mcp add --transport http playground "http://127.0.0.1:PORT/mcp/<playground>?token=…"
+```
+
+The page shows the laws and their results, a live preview of what the agent
+builds in `public/`, and a drawer with the agent's activity, the files, and
+these connection instructions. A failing check is explained in plain sentences,
+with the raw output folded away.
+
+The agent gets tools to read and write laws, write files under the manifest's
+`writable` directories, run tests in the sandbox, and call `plan` and `check`.
+The server listens on 127.0.0.1 only, requires the session token on every
+request, and refuses foreign `Host` and `Origin` headers.
+
+### Versions
+
+A playground can hold several versions of its code, all judged by the same laws:
+the code in the playground's own folders is the `main` version, and every
+folder in `versions/<id>/` (same layout) is another. Pick one in the page and
+press **Check**, or **Check all versions**. Nothing is copied or swapped:
+verdict tells each enforcer where the code is through the `VERDICT_TARGET`
+environment variable (Semgrep is pointed at that folder), so enforcers must read
+the code from there and not relative to their own file. The planner is told to
+write them that way. Describe versions in `PLAYGROUND.json`:
+
+```json
+{ "main": { "label": "Correct" },
+  "versions": [{ "id": "skips-yellow", "label": "Skips yellow", "note": "Green drops straight to red." }] }
+```
+
+A playground is a world of its own: an outer `verdict check` or `verdict plan`
+skips any folder that has a `PLAYGROUND.json`, unless you point at it
+(`verdict check examples/traffic-light`).
+
+### Making a playground
+
+Use the `create-playground` skill in
+[skills/create-playground](skills/create-playground/SKILL.md): give it an idea
+and it writes the manifest and starter laws, validates them, and launches it.
+[examples/traffic-light](examples/traffic-light) is a worked one, with five
+versions.
+
 ## In CI and git hooks
 
 `verdict check` needs no agent unless a law has an LLM judge, or a judge's

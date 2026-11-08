@@ -34,11 +34,12 @@ export function hashFile(root: string, file: string): string | null {
 }
 
 // Why this spec no longer matches its code, or null when it does.
-export function staleReason(root: string, specPath: string): string | null {
+// The spec is read from `root`; the files it models are looked up in `target`.
+export function staleReason(root: string, specPath: string, target = root): string | null {
   const models = modelsOf(readFileSync(join(root, specPath), "utf8"));
   if (models.length === 0) return `${specPath} has no "models:" line: name each file the spec describes, e.g. \\* models: src/controller.js`;
   for (const m of models) {
-    const now = hashFile(root, m.file);
+    const now = hashFile(target, m.file);
     if (now === null) return `${STALE}: ${m.file} no longer exists. Run \`verdict plan\` so the spec is re-read against the code`;
     if (m.hash === null) return `${specPath} is not stamped with the hash of ${m.file}. Run \`verdict plan\``;
     if (now !== m.hash) return `${STALE}: ${m.file} (was ${m.hash}, now ${now}). Run \`verdict plan\`: it re-stamps the spec if its tests still pass, and re-plans the law if not`;
