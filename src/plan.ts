@@ -7,7 +7,7 @@ import { Break, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./bre
 import { KINDS, scopeOf, SKIPPED } from "./enforcers.ts";
 import { exec, which } from "./exec.ts";
 import type { Law } from "./laws.ts";
-import { writeLock, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
+import { writeLock, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
 import { inputsOf } from "./pins.ts";
 import { LINTERS, linterFor, scopeFiles } from "./linters.ts";
@@ -18,7 +18,7 @@ import { jobs, makeLimit, type Limit } from "./limit.ts";
 
 export const OUT_DIR = ".verdict";
 
-const PROBE = ["semgrep", "eslint", "ruff", "golangci-lint", "clippy-driver", "mypy", "pyright", "tlc", "java", "go", "python3", "pytest", "cargo", "bun", "node"];
+const PROBE = ["semgrep", "eslint", "oxlint", "ruff", "golangci-lint", "clippy-driver", "mypy", "pyright", "tlc", "java", "go", "python3", "pytest", "cargo", "bun", "node"];
 
 export const SYSTEM = `You plan how to enforce one law about a software repository. A law is
 an assertion in prose. You pick the enforcer(s) that check it, write them into

@@ -1,12 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { reproveLaw } from "../src/reprove.ts";
 import { readBreaks, writeBreaks, prove } from "../src/breaks.ts";
 import { checkLaw, format } from "../src/check.ts";
 import { parseLaws } from "../src/laws.ts";
 import { readLock, type Lock } from "../src/lock.ts";
-import { overrides } from "../src/models.ts";
 import { overrides as agents } from "../src/agent.ts";
 import { plan } from "../src/plan.ts";
 import { at } from "../src/where.ts";

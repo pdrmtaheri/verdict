@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { overrides as agents } from "../src/agent.ts";
-import { prove, writeBreaks } from "../src/breaks.ts";
+import { prove } from "../src/breaks.ts";
 import { check, format } from "../src/check.ts";
 import { parseLaws } from "../src/laws.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";

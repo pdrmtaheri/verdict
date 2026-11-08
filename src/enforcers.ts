@@ -98,7 +98,7 @@ export function testCommand(root: string, file: string, repo = root, name?: stri
     if (d.jest) return { runner: "jest", argv: [which(root, "jest") ?? "jest", file, ...(name ? ["-t", pattern] : [])] };
     return { runner: "bun", argv: ["bun", "test", `./${file}`, ...(name ? ["-t", pattern] : [])] };
   }
-  if (/_test\.go$/.test(file)) return { runner: "go", argv: ["go", "test", "-v", `./${dirname(file)}`, ...(name ? ["-run", exactly(name)] : [])] };
+  if (file.endsWith("_test.go")) return { runner: "go", argv: ["go", "test", "-v", `./${dirname(file)}`, ...(name ? ["-run", exactly(name)] : [])] };
   if (/(^|\/)test_[^/]*\.py$|_test\.py$/.test(file)) return { runner: "pytest", argv: ["python3", "-m", "pytest", name ? `${file}::${name}` : file] };
   if (name) return null; // a script is one test
   if (statSync(join(root, file)).mode & 0o111) return { runner: "script", argv: [`./${file}`] };

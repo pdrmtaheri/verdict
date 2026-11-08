@@ -7,7 +7,6 @@ import { parseLaws } from "../src/laws.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";
 import { overrides } from "../src/models.ts";
 import { overrides as agents } from "../src/agent.ts";
-import { plan } from "../src/plan.ts";
 import { inside } from "../src/tools.ts";
 import { at } from "../src/where.ts";
 import { repo, scriptedAgent } from "./helpers.ts";
@@ -145,7 +144,6 @@ test("grep skips tracked symlinks that point outside the repo; git rejects writi
   Bun.spawnSync(["git", "add", "-A"], { cwd: root });
   const tools = readTools(root);
   expect(await tools.list_files.execute({} as never)).toContain("link.txt");
-  const opts = { toolCallId: "t", messages: [] } as never;
   expect(await tools.grep.execute({ pattern: "TOKEN" } as never)).toBe("(no matches)");
   await expect(tools.git.execute({ args: ["diff", "--output=/tmp/x"] } as never)).rejects.toThrow("not allowed");
   await expect(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] } as never)).rejects.toThrow("not allowed");

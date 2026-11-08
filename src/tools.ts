@@ -175,7 +175,7 @@ export function readTools(root: string, repo = root) {
 
 // Programs the planner may run to validate what it generated. No shell.
 const RUNNABLE = new Set([
-  "semgrep", "eslint", "ruff", "golangci-lint", "mypy", "pyright",
+  "semgrep", "eslint", "oxlint", "ruff", "golangci-lint", "mypy", "pyright",
   "tlc", "java", "bun", "npx", "go", "python", "python3", "pytest", "cargo",
 ]);
 
