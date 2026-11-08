@@ -64,7 +64,10 @@ const GIT_FLAGS: Record<string, string[]> = {
   "ls-files": ["--cached", "-c", "--others", "-o", "--exclude-standard", "--deleted", "-d", "--modified", "-m"],
   blame: ["-L", "-w", "-e", "--porcelain", "-s", "-l", "--date="],
 };
-const TAKES_VALUE = new Set(["-n", "-L", "-U"]);
+// Only flags whose value git always takes from the next argument. -U's value
+// is optional and must be attached (-U3): git doesn't consume the next
+// argument, so skipping it would let an unchecked flag through.
+const TAKES_VALUE = new Set(["-n", "-L"]);
 
 export function checkGitArgs(root: string, args: string[]): void {
   const [sub, ...rest] = args;
@@ -74,9 +77,12 @@ export function checkGitArgs(root: string, args: string[]): void {
     const a = rest[i]!;
     if (a === "--") continue;
     if (a.startsWith("-")) {
-      const ok = flags.some((f) => (f.endsWith("=") ? a.startsWith(f) : a === f || (TAKES_VALUE.has(f) && /^-[nLU]\d/.test(a) && a.startsWith(f))));
+      const ok = flags.some((f) => (f.endsWith("=") ? a.startsWith(f) : a === f || ((f === "-n" || f === "-U") && new RegExp(`^${f}\\d+$`).test(a))));
       if (!ok) throw new Error(`git ${sub} ${a} is not allowed`);
-      if (TAKES_VALUE.has(a)) i++; // its value is the next argument
+      if (TAKES_VALUE.has(a)) {
+        if (i + 1 >= rest.length) throw new Error(`git ${sub} ${a} needs a value`);
+        i++; // git always takes the next argument as its value
+      }
     } else if (lexists(resolve(root, a))) {
       inside(root, a); // a path: must stay in the repo
     }

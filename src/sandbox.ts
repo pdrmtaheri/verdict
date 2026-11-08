@@ -52,9 +52,18 @@ export function macProfile(box: Box, home: string): string {
       '(allow network-bind (local ip "localhost:*"))',
       '(allow network-inbound (local ip "localhost:*"))',
       '(allow network-outbound (remote ip "localhost:*"))',
-      "(allow network-outbound (remote unix-socket))",
     );
   }
+  // (allow default) leaves ways out of the sandbox that don't touch files or
+  // the network: asking launchd to open an app or script (open, osascript,
+  // Launch Services), and the keychain. Unix sockets (an ssh agent, Docker)
+  // are already denied by (deny network*) when the network is off.
+  rules.push(
+    "(deny lsopen)",
+    '(deny process-exec (literal "/usr/bin/open") (literal "/usr/bin/osascript") (literal "/usr/bin/osacompile"))',
+    '(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name-prefix "com.apple.lsd.") (global-name "com.apple.coreservices.appleevents") (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))',
+  );
+  if (box.network) rules.push("(deny network-outbound (remote unix-socket))");
   rules.push(
     "(deny file-write*)",
     '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))',
@@ -67,8 +76,11 @@ export function macProfile(box: Box, home: string): string {
 }
 
 export function bwrapArgs(box: Box, home: string, cwd: string): string[] {
-  const args = ["--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", home];
-  for (const r of [...box.readable, ...toolRoots(home)]) if (under(real(r), home)) args.push("--ro-bind", real(r), real(r));
+  // /run, /var/run and /tmp hold other programs' sockets (Docker, D-Bus, ssh
+  // agents, X11); they're hidden, then only the given paths are bound back.
+  const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/tmp", "--tmpfs", home];
+  const hidden = [home, "/tmp", "/run"];
+  for (const r of [...box.readable, ...toolRoots(home)]) if (hidden.some((h) => under(real(r), h))) args.push("--ro-bind", real(r), real(r));
   for (const w of box.writable) args.push("--bind", real(w), real(w));
   if (!box.network) args.push("--unshare-net");
   args.push("--chdir", cwd);

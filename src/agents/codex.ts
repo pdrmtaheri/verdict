@@ -7,34 +7,66 @@
 // in verdict's OS sandbox (src/sandbox.ts): its shell can read the repo and
 // Codex's own files but nothing else in the user's home, and can write only to
 // Codex's state directory. It keeps network access, since Codex needs it to
-// reach its model. With VERDICT_SANDBOX=off, Codex's own read-only sandbox is
-// the only limit, and it can't stop reads outside the repo.
+// reach its model, and that is the remaining risk: the shell can read the
+// copied login and has the network, so a prompt-injected shell command could
+// send the login away. Claude Code and Pi have no shell to do that. With
+// VERDICT_SANDBOX=off, Codex's own read-only sandbox is the only limit, and it
+// can't stop reads outside the repo.
 import { z } from "zod";
-import { existsSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { callTool, type Agent, type AgentTask } from "../agent.ts";
 import { sandboxed } from "../sandbox.ts";
 
-function launch(cwd: string): { argv: string[]; env?: Record<string, string> } {
-  if (process.env.VERDICT_SANDBOX === "off") return { argv: ["codex", "app-server"] };
-  const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+// Codex inside verdict's sandbox gets a throwaway CODEX_HOME holding only a
+// copy of the user's login (auth.json): it never sees, and can't change, the
+// real config.toml (hooks, MCP servers, notify commands that would later run
+// unsandboxed), history or sessions. If Codex refreshes its tokens, the new
+// auth.json is copied back after the run, but only if it is still a login file.
+function launch(cwd: string): { argv: string[]; env?: Record<string, string>; done: () => void } {
+  if (process.env.VERDICT_SANDBOX === "off") return { argv: ["codex", "app-server"], done: () => {} };
+  const realHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
   const bin = Bun.which("codex");
   if (!bin) throw new Error("codex is not installed: install the Codex CLI and run `codex login`");
+  const realAuth = join(realHome, "auth.json");
+  if (!existsSync(realAuth)) throw new Error(`no Codex login in ${realHome}: run \`codex login\`, then run verdict again`);
+  const codexHome = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "verdict-codex-home-"));
+  const before = readFileSync(realAuth, "utf8");
+  writeFileSync(join(codexHome, "auth.json"), before, { mode: 0o600 });
   const install = dirname(dirname(realpathSync(bin)));
-  return sandboxed(["codex", "app-server"], {
+  const box = sandboxed(["codex", "app-server"], {
     readable: [cwd, install],
-    writable: [codexHome].filter(existsSync),
+    writable: [codexHome],
     network: true,
-    home: homedir(), // Codex finds its login and config under ~/.codex
-    env: { ...(process.env.CODEX_HOME ? { CODEX_HOME: codexHome } : {}) },
   }, cwd);
+  const done = () => {
+    try {
+      const after = readFileSync(join(codexHome, "auth.json"), "utf8");
+      if (after !== before && sameShape(before, after)) writeFileSync(realAuth, after, { mode: 0o600 });
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  };
+  return { argv: box.argv, env: { ...box.env, CODEX_HOME: codexHome }, done };
+}
+
+// A refreshed login has the same top-level fields as the old one.
+function sameShape(a: string, b: string): boolean {
+  try {
+    const x = JSON.parse(a), y = JSON.parse(b);
+    const keys = (o: unknown) => (o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).sort().join(",") : null);
+    return keys(x) !== null && keys(x) === keys(y);
+  } catch {
+    return false;
+  }
 }
 
 type Message = { id?: number | string; method?: string; params?: any; result?: any; error?: { code?: number; message?: string } };
 
 class Connection {
   private proc!: Bun.Subprocess<"pipe", "pipe", "pipe">;
+  private cleanup: () => void = () => {};
   private next = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private stderr = "";
@@ -44,7 +76,8 @@ class Connection {
     private onRequest: (m: Message) => Promise<unknown>,
     private onNotification: (m: Message) => void,
   ) {
-    const { argv, env } = launch(cwd);
+    const { argv, env, done } = launch(cwd);
+    this.cleanup = done;
     this.proc = Bun.spawn(argv, { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     void this.read();
     void (async () => {
@@ -96,8 +129,10 @@ class Connection {
     }
   }
 
-  close() {
+  async close() {
     this.proc.kill();
+    await this.proc.exited;
+    this.cleanup();
   }
 }
 
@@ -156,7 +191,7 @@ export const codex: Agent = {
       });
       await finished;
     } finally {
-      conn.close();
+      await conn.close();
     }
   },
 };

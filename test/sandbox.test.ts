@@ -17,6 +17,9 @@ test("the macOS profile denies writes, home reads and the network except what's 
   expect(p).toContain('(allow file-read* (subpath "/r"))');
   expect(p).toContain("(deny network*)");
   expect(macProfile({ readable: [], writable: [], network: true }, "/Users/me")).not.toContain("(deny network*)");
+  // No way out through launchd, apps, scripts or the keychain; no unix sockets even with network on.
+  for (const deny of ["(deny lsopen)", "/usr/bin/open", "/usr/bin/osascript", "com.apple.coreservices.launchservicesd", "com.apple.SecurityServer"]) expect(p).toContain(deny);
+  expect(macProfile({ readable: [], writable: [], network: true }, "/Users/me")).toContain("(deny network-outbound (remote unix-socket))");
 });
 
 test("the bubblewrap arguments hide home, bind only what's given, and cut the network", () => {
@@ -24,6 +27,8 @@ test("the bubblewrap arguments hide home, bind only what's given, and cut the ne
   expect(a.join(" ")).toContain("--tmpfs /home/me");
   expect(a.join(" ")).toContain("--bind /w /w");
   expect(a).toContain("--unshare-net");
+  for (const flag of ["--unshare-pid", "--unshare-ipc", "--new-session"]) expect(a).toContain(flag);
+  expect(a.join(" ")).toContain("--tmpfs /run --tmpfs /tmp");
 });
 
 test.skipIf(!live)("live: planner-written code can't write to the repo or see verdict's environment", async () => {
@@ -53,6 +58,10 @@ test("git allows only listed flags per subcommand", () => {
   expect(() => checkGitArgs(root, ["diff", "--no-index", "/etc/hosts", "a.txt"])).toThrow("not allowed");
   expect(() => checkGitArgs(root, ["log", "--orderfile=/etc/hosts"])).toThrow("not allowed");
   expect(() => checkGitArgs(root, ["push"])).toThrow("not allowed");
+  // -U's value is optional and attached; the next argument is still checked.
+  expect(() => checkGitArgs(root, ["diff", "-U", "--output=/tmp/x"])).toThrow("not allowed");
+  expect(() => checkGitArgs(root, ["diff", "-U3"])).not.toThrow();
+  expect(() => checkGitArgs(root, ["log", "-n"])).toThrow("needs a value");
 });
 
 test("write_file refuses a dangling symlink in .verdict/", async () => {
