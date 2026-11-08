@@ -1,0 +1,158 @@
+// How each enforcer kind runs. Every kind observes the repo from outside.
+import { existsSync, readFileSync, statSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { experimental_decide } from "ai";
+import { z } from "zod";
+import { runAgent } from "./agent.ts";
+import { exec, tail, which } from "./exec.ts";
+import { decisionModel, languageModel } from "./models.ts";
+import { fail, inconclusive, pass, type Result } from "./result.ts";
+import { readTools } from "./tools.ts";
+
+export interface Context {
+  root: string;
+  law: string;
+  path: string; // enforcer file, relative to root
+}
+
+type Runner = (ctx: Context) => Promise<Result>;
+
+// ---------------------------------------------------------------- semgrep
+// The only pattern-rule engine. Type-aware rules run as tests (see plan.ts).
+// Exit 0 = pass, 1 = findings, anything else = semgrep itself failed.
+
+const semgrep: Runner = async ({ root, path }) => {
+  const exe = which(root, "semgrep");
+  if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
+  const r = await exec([exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"], { cwd: root });
+  if (r.code === 0) return pass();
+  if (r.code === 1) return fail(tail(r.output));
+  return inconclusive(`semgrep exited ${r.code}\n${tail(r.output)}`);
+};
+
+// ---------------------------------------------------------------- tests
+// The runner is inferred from the file name and the repo's own tooling.
+
+function deps(root: string): Record<string, string> {
+  const pkg = join(root, "package.json");
+  if (!existsSync(pkg)) return {};
+  const json = JSON.parse(readFileSync(pkg, "utf8"));
+  return { ...json.dependencies, ...json.devDependencies };
+}
+
+export function testCommand(root: string, file: string): string[] | null {
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
+    const d = deps(root);
+    if (d["@playwright/test"] && /\.spec\./.test(file)) return [which(root, "playwright") ?? "playwright", "test", file];
+    if (d.vitest) return [which(root, "vitest") ?? "vitest", "run", file];
+    if (d.jest) return [which(root, "jest") ?? "jest", file];
+    return ["bun", "test", `./${file}`];
+  }
+  if (/_test\.go$/.test(file)) return ["go", "test", `./${dirname(file)}`];
+  if (/(^|\/)test_[^/]*\.py$|_test\.py$/.test(file)) return ["python3", "-m", "pytest", file];
+  if (statSync(join(root, file)).mode & 0o111) return [`./${file}`];
+  return null;
+}
+
+const test: Runner = async ({ root, path }) => {
+  const argv = testCommand(root, path);
+  if (!argv) return inconclusive(`don't know how to run ${path}`);
+  if (!argv[0]!.startsWith("./") && !which(root, argv[0]!)) return inconclusive(`${argv[0]} is not installed`);
+  const r = await exec(argv, { cwd: root });
+  return r.code === 0 ? pass() : fail(tail(r.output));
+};
+
+// ---------------------------------------------------------------- TLA+
+// TLC exit codes: 0 ok, 10-14 a property was violated, others are errors.
+
+const tla: Runner = async ({ root, path }) => {
+  const jar = process.env.VERDICT_TLA2TOOLS;
+  const tlc = Bun.which("tlc") ? ["tlc"] : jar ? ["java", "-cp", jar, "tlc2.TLC"] : null;
+  if (!tlc) return inconclusive("TLC is not installed (put tlc on PATH or set VERDICT_TLA2TOOLS to tla2tools.jar)");
+  const meta = mkdtempSync(join(tmpdir(), "verdict-tlc-"));
+  const r = await exec([...tlc, "-workers", "auto", "-metadir", meta, path], { cwd: root });
+  if (r.code === 0) return pass();
+  if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
+  return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);
+};
+
+// ---------------------------------------------------------------- decision models (jev)
+// The file says where the state comes from and what to ask. Choices are
+// always pass / fail / inconclusive, so no mapping is needed.
+
+const DecisionFile = z.object({
+  state_from: z.string(),
+  instructions: z.string(),
+  criteria: z.object({ pass: z.string(), fail: z.string(), inconclusive: z.string() }),
+  min_probability: z.number().min(0).max(1).default(0.85),
+});
+
+const decision: Runner = async ({ root, path }) => {
+  const spec = DecisionFile.parse(JSON.parse(readFileSync(join(root, path), "utf8")));
+  const state = await exec(["sh", "-c", spec.state_from], { cwd: root });
+  if (state.code !== 0) return inconclusive(`state_from exited ${state.code}\n${tail(state.output)}`);
+  if (state.output === "") return pass("state_from produced nothing to judge");
+  const result = await experimental_decide({
+    model: decisionModel(),
+    state: state.output,
+    questions: { verdict: { type: "choice", instructions: spec.instructions, criteria: spec.criteria } },
+  });
+  const answer = result.answers.verdict;
+  const p = answer.probabilities?.[answer.choice];
+  if (answer.choice === "inconclusive") return inconclusive("the decision model can't tell");
+  if (p == null || p < spec.min_probability) {
+    return inconclusive(`the decision model leaned ${answer.choice} at p=${p?.toFixed(2) ?? "?"}, below ${spec.min_probability}`);
+  }
+  return answer.choice === "pass" ? pass() : fail(`the decision model judged it false (p=${p.toFixed(2)})`);
+};
+
+// ---------------------------------------------------------------- LLM judge
+
+const JUDGE_SYSTEM = `You check whether one law holds for a software repository.
+You can read files, search, and run read-only git commands. Look for evidence
+before deciding. When done, call submit exactly once.
+- pass: you found evidence the law holds and none that it is broken.
+- fail: you found a concrete violation. Quote the file and line.
+- inconclusive: you can't tell from what the repository shows.`;
+
+const Verdict = z.object({
+  status: z.enum(["pass", "fail", "inconclusive"]),
+  reason: z.string().describe("One or two sentences. For fail, name file:line."),
+});
+
+const llm: Runner = async ({ root, law, path }) => {
+  const hints = readFileSync(join(root, path), "utf8");
+  const verdict = await runAgent({
+    model: languageModel(),
+    system: JUDGE_SYSTEM,
+    prompt: `Law: ${law}\n\nNotes from the plan:\n${hints}`,
+    tools: readTools(root),
+    submit: { description: "Report your verdict on the law.", schema: Verdict },
+  });
+  if (!verdict) return inconclusive("the judge did not reach a verdict");
+  return { status: verdict.status, message: verdict.reason };
+};
+
+// ---------------------------------------------------------------- registry
+
+export const RUNNERS: Record<string, Runner> = {
+  semgrep,
+  test,
+  tla,
+  decision,
+  llm,
+};
+
+export const KINDS = Object.keys(RUNNERS);
+
+export async function runEnforcer(kind: string, ctx: Context): Promise<Result> {
+  const runner = RUNNERS[kind];
+  if (!runner) return inconclusive(`unknown enforcer kind "${kind}"`);
+  if (!existsSync(join(ctx.root, ctx.path))) return fail(`${ctx.path} is missing`);
+  try {
+    return await runner(ctx);
+  } catch (err) {
+    return inconclusive(err instanceof Error ? err.message : String(err));
+  }
+}
