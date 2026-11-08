@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "enforcer": ".verdict/error-next-step-cli.test.ts",
+    "description": "runEnforcer's missing-file branch prints only \"<path> is missing\", with no restore or `verdict plan` step",
+    "edits": [
+      {
+        "path": "src/enforcers.ts",
+        "find": "is missing: restore it from git, or run \\`verdict plan\\` to plan the law again`",
+        "replace": "is missing`"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/error-messages-next-step.judge.md",
+    "description": "the missing TYPESAFE_AI_API_KEY error in src/models.ts says only that the key isn't set, not to set it",
+    "edits": [
+      {
+        "path": "src/models.ts",
+        "find": "TYPESAFE_AI_API_KEY is not set, so decision-model enforcers can't run: set it to your TypeSafe AI key, then run verdict check again",
+        "replace": "TYPESAFE_AI_API_KEY is not set"
+      }
+    ]
+  }
+]
