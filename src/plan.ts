@@ -90,14 +90,14 @@ Enforcer kinds (the "kind" in submit) and their file formats
      typescript-eslint rule, ...), written inside ${OUT_DIR}/ and run by a test
      script.
   4. A behavioural test or an LLM judge.
-- lint: a rule the project's own linter already has (${"eslint, ruff"}). path is
-  the linter's config file (eslint.config.js, .eslintrc.*, ruff.toml,
-  pyproject.toml), rule is the rule's id, and scope is globs relative to the
-  law's directory (e.g. "src/**/*.ts"). verdict runs the linter under that
-  config and keeps that rule's findings in the scope. Use it instead of a
-  semgrep rule when the project's linter already checks the law; never write
-  linter rules or configs of your own. Its break is code that violates the
-  rule.
+- lint: a rule the project's own linter already has (eslint, oxlint, ruff).
+  path is the linter's config file (eslint.config.js, .eslintrc.*,
+  .oxlintrc.json, ruff.toml, pyproject.toml), rule is the rule's id, and
+  scope is globs relative to the law's directory (e.g. "src/**/*.ts").
+  verdict runs the linter under that config and keeps that rule's findings in
+  the scope. Use it instead of a semgrep rule when the project's linter
+  already checks the law; never write linter rules or configs of your own.
+  Its break is code that violates the rule.
 - test: one test file, run with the repo's test framework. The runner is
   inferred from the file name: *.test.ts / *.spec.ts (vitest, jest, playwright
   for .spec with @playwright/test, else bun test), *_test.go (go test on its

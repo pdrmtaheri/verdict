@@ -4,8 +4,8 @@
 // that rule's findings in the scope. The tool is inferred from the config's
 // file name. Turning the rule off is reported directly when the linter can
 // say so, and otherwise shows up when check replays the break.
-import { realpathSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import type { ExecResult } from "./exec.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 
@@ -115,7 +115,79 @@ const ruff: Linter = {
   },
 };
 
-export const LINTERS = [eslint, ruff];
+// oxlint names a rule "plugin/name" in its config ("no-var" is eslint's) and
+// "plugin(name)" in its report; both normalise to "plugin/name".
+const OX_ALIASES: Record<string, string> = { "@typescript-eslint": "typescript", "typescript-eslint": "typescript", "eslint-plugin-unicorn": "unicorn" };
+export function oxRule(id: string): string {
+  const report = /^([\w@/-]+)\(([\w-]+)\)$/.exec(id);
+  const [plugin, name] = report ? [report[1]!, report[2]!] : id.includes("/") ? [id.slice(0, id.lastIndexOf("/")), id.slice(id.lastIndexOf("/") + 1)] : ["eslint", id];
+  return `${OX_ALIASES[plugin] ?? plugin}/${name}`;
+}
+const oxOff = (level: unknown) => {
+  const l = Array.isArray(level) ? level[0] : level;
+  return l === "off" || l === "allow" || l === 0;
+};
+
+// Disable comments that name the rule, or no rule (they silence all). oxlint
+// honours both its own and eslint's, and doesn't report what they suppressed.
+function disables(root: string, files: string[], rule: string): number {
+  let n = 0;
+  for (const f of files) {
+    let text: string;
+    try {
+      text = readFileSync(join(root, f), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(/(?:eslint|oxlint)-disable(?:-next-line|-line)?([^\n*]*)/g)) {
+      const named = m[1]!.split(/[\s,]+/).filter((r) => r && !r.startsWith("--"));
+      if (named.length === 0 || named.some((r) => oxRule(r) === oxRule(rule))) n++;
+    }
+  }
+  return n;
+}
+
+const oxlint: Linter = {
+  name: "oxlint",
+  configs: /^(\.oxlintrc\.jsonc?|oxlint\.config\.[cm]?[jt]s)$/,
+  install: "add oxlint to the project's dev dependencies",
+  // --print-config gives the base rules (defaults included), the overrides and
+  // the ignore patterns, not a file's own config: overrides are applied here,
+  // and --debug files says which files oxlint would lint at all.
+  async off(ctx, exe, files) {
+    const printed = await ctx.run([exe, "-c", ctx.config, "--print-config"]);
+    const cfg = printed.code === 0 ? (parse(printed) as { rules?: Record<string, unknown>; overrides?: { files: string[]; rules?: Record<string, unknown> }[] } | null) : null;
+    if (!cfg?.rules) return null;
+    const want = oxRule(ctx.rule);
+    const level = (rules: Record<string, unknown> = {}) => Object.entries(rules).find(([k]) => oxRule(k) === want)?.[1];
+    const listed = await ctx.run([exe, "-c", ctx.config, "--debug", "files", ...files.map((f) => `./${f}`)]);
+    if (listed.code !== 0) return null;
+    const linted = new Set(listed.stdout.split("\n").map((l) => l.trim().replace(/^\.\//, "")).filter(Boolean));
+    const base = dirname(join(ctx.root, ctx.config)); // override globs are relative to the config
+    const off: string[] = [];
+    for (const f of files) {
+      if (!linted.has(f)) {
+        off.push(`${f} (ignored by the config)`);
+        continue;
+      }
+      let l = level(cfg.rules);
+      const rel = relative(base, join(ctx.root, f));
+      for (const o of cfg.overrides ?? []) if (o.files.some((g) => new Bun.Glob(g).match(rel)) && level(o.rules) !== undefined) l = level(o.rules);
+      if (l === undefined || oxOff(l)) off.push(f);
+    }
+    return off;
+  },
+  async findings(ctx, exe, files) {
+    const r = await ctx.run([exe, "-c", ctx.config, "--format", "json", ...files.map((f) => `./${f}`)]);
+    const out = parse(r) as { diagnostics?: { code: string; filename: string; message: string; labels?: { span: { line: number } }[] }[] } | null;
+    if (!out || !Array.isArray(out.diagnostics)) return inconclusive(`oxlint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
+    const want = oxRule(ctx.rule);
+    const found = out.diagnostics.filter((d) => oxRule(d.code) === want).map((d) => ({ file: d.filename, line: d.labels?.[0]?.span.line ?? 0, message: d.message }));
+    return { found, suppressed: disables(ctx.root, files, ctx.rule) };
+  },
+};
+
+export const LINTERS = [eslint, oxlint, ruff];
 
 export const linterFor = (config: string): Linter | undefined => LINTERS.find((l) => l.configs.test(basename(config)));
 

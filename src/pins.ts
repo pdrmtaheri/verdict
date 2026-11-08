@@ -27,7 +27,7 @@ const CONFIG: Record<string, string[]> = {
 // Dependencies whose version changes what an enforcer does.
 const DEPS: Record<string, (name: string) => boolean> = {
   test: (n) => ["vitest", "jest", "@playwright/test", "ts-jest"].includes(n),
-  lint: (n) => n === "eslint" || n.includes("eslint-plugin") || n.includes("eslint-config") || n === "typescript-eslint" || n === "@biomejs/biome",
+  lint: (n) => n === "eslint" || n.includes("eslint-plugin") || n.includes("eslint-config") || n === "typescript-eslint" || n === "@biomejs/biome" || n === "oxlint",
 };
 
 const fingerprint = (text: string | Buffer) => createHash("sha256").update(text).digest("hex").slice(0, 12);

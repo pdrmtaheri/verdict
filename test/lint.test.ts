@@ -105,3 +105,42 @@ test.skipIf(!hasRuff)("ruff: per-file-ignores for the rule fail the law", async 
   expect(r.status).toBe("fail");
   expect(r.details[0]!.result.message).toContain("app/legacy/b.py (per-file-ignores)");
 });
+
+// oxlint is a dev dependency of verdict, so these always run.
+const OXLINT = JSON.stringify({
+  rules: { "no-var": "error", "typescript/no-explicit-any": "error" },
+  ignorePatterns: ["src/gen/**"],
+  overrides: [{ files: ["src/legacy/**"], rules: { "no-var": "off" } }],
+});
+const oxE = { kind: "lint", path: ".oxlintrc.json", rule: "no-var", scope: "src/*.ts" };
+const ox = (files: Record<string, string>) => {
+  const root = repo({ ".oxlintrc.json": OXLINT, ...files });
+  Bun.spawnSync(["ln", "-s", join(import.meta.dir, "../node_modules"), join(root, "node_modules")]);
+  return root;
+};
+
+test("oxlint: the rule's findings decide the law, whatever the rule is called", async () => {
+  expect((await lint(ox({ "src/a.ts": "export const a = 1;\n" }), oxE)).status).toBe("pass");
+  const bad = await lint(ox({ "src/a.ts": "var a: any = 1;\nexport { a };\n" }), oxE);
+  expect(bad.status).toBe("fail");
+  expect(bad.details[0]!.result.message).toContain("no-var: 1 finding");
+  const anyE = { ...oxE, rule: "@typescript-eslint/no-explicit-any" };
+  const anyBad = await lint(ox({ "src/a.ts": "export const a: any = 1;\n" }), anyE);
+  expect(anyBad.details[0]!.result.message).toContain("1 finding");
+});
+
+test("oxlint: a rule turned off by an override, or a file ignored, fails the law", async () => {
+  const scoped = { ...oxE, scope: "src/**/*.ts" };
+  const r = await lint(ox({ "src/a.ts": "export const a = 1;\n", "src/legacy/b.ts": "var b = 1;\nexport { b };\n" }), scoped);
+  expect(r.status).toBe("fail");
+  expect(r.details[0]!.result.message).toContain("1 of 2 files in the scope: src/legacy/b.ts");
+  const g = await lint(ox({ "src/a.ts": "export const a = 1;\n", "src/gen/c.ts": "var c = 1;\nexport { c };\n" }), scoped);
+  expect(g.status).toBe("fail");
+  expect(g.details[0]!.result.message).toContain("src/gen/c.ts (ignored by the config)");
+});
+
+test("oxlint: disable comments are reported", async () => {
+  const r = await lint(ox({ "src/a.ts": "// oxlint-disable-next-line no-var\nvar a = 1;\nexport { a };\n" }), oxE);
+  expect(r.status).toBe("pass");
+  expect(r.details[0]!.warnings.join("\n")).toContain("1 finding of no-var suppressed");
+});
