@@ -17,6 +17,9 @@ export interface Box {
   readable: string[]; // extra paths readable inside the user's home
   writable: string[];
   network: boolean;
+  // With the network off: the localhost ports it may connect to. Unset means
+  // any localhost port (tests that start a local server need that).
+  localhostPorts?: number[];
   home?: string; // HOME inside the sandbox; a fresh empty directory by default
   env?: Record<string, string>;
 }
@@ -47,12 +50,16 @@ const q = (p: string) => JSON.stringify(p); // SBPL string literal
 export function macProfile(box: Box, home: string): string {
   const rules = ["(version 1)", "(allow default)"];
   if (!box.network) {
-    rules.push(
-      "(deny network*)",
-      '(allow network-bind (local ip "localhost:*"))',
-      '(allow network-inbound (local ip "localhost:*"))',
-      '(allow network-outbound (remote ip "localhost:*"))',
-    );
+    rules.push("(deny network*)");
+    if (box.localhostPorts) {
+      for (const port of box.localhostPorts) rules.push(`(allow network-outbound (remote ip "localhost:${port}"))`);
+    } else {
+      rules.push(
+        '(allow network-bind (local ip "localhost:*"))',
+        '(allow network-inbound (local ip "localhost:*"))',
+        '(allow network-outbound (remote ip "localhost:*"))',
+      );
+    }
   }
   // (allow default) leaves ways out of the sandbox that don't touch files or
   // the network: asking launchd to open an app or script (open, osascript,
@@ -79,7 +86,9 @@ export function bwrapArgs(box: Box, home: string, cwd: string): string[] {
   // /run, /var/run and /tmp hold other programs' sockets (Docker, D-Bus, ssh
   // agents, X11); they're hidden, then only the given paths are bound back.
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/tmp", "--tmpfs", home];
-  const hidden = [home, "/tmp", "/run"];
+  // /var/run is usually a link to /run; where it's a real directory, hide it too.
+  if (existsSync("/var/run") && real("/var/run") !== "/run") args.push("--tmpfs", "/var/run");
+  const hidden = [home, "/tmp", "/run", "/var/run"];
   for (const r of [...box.readable, ...toolRoots(home)]) if (hidden.some((h) => under(real(r), h))) args.push("--ro-bind", real(r), real(r));
   for (const w of box.writable) args.push("--bind", real(w), real(w));
   if (!box.network) args.push("--unshare-net");

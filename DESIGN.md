@@ -231,7 +231,7 @@ accepted.
 | Agent | Talks to | verdict's tools reach it as | Built-in tools |
 |---|---|---|---|
 | claude-code (default) | Claude Agent SDK | an in-process MCP server | off (`tools: []`); the user's MCP servers, settings and hooks are ignored |
-| codex | `codex app-server`, JSON-RPC 2.0 on stdio | dynamic tools (experimental API) | its shell can't be switched off, so threads run in a read-only sandbox with approvals off: it can read anything but write nothing |
+| codex | `codex app-server`, JSON-RPC 2.0 on stdio | dynamic tools (experimental API) | its shell can't be switched off, so the whole app-server runs in verdict's sandbox with no network of its own (see below) |
 | pi | Pi's SDK (`@earendil-works/pi-coding-agent`), in process | custom tools | off (`noTools: "all"` plus an allowlist); no extensions, skills, prompt templates or context files; in-memory session |
 
 Tool input is validated against the tool's zod schema in verdict
@@ -255,8 +255,18 @@ Everything it can cause to run is therefore confined:
 - File tools resolve every path, refuse anything outside the repo, refuse
   dangling symlinks, and `write_file` writes only in `.verdict/`.
 - The git tool allows a fixed list of flags per subcommand.
-- Codex's app-server runs in the same sandbox (with network, and write access
-  only to Codex's own state directory), since its shell can't be switched off.
+- Codex's app-server runs in the same sandbox, since its shell can't be
+  switched off. It has no network of its own: its only way out is verdict's
+  egress proxy (`src/egress.ts`), which tunnels HTTPS to OpenAI's hosts
+  (`VERDICT_CODEX_HOSTS`) and refuses everything else. On macOS the sandbox
+  allows only the proxy's localhost port; on Linux the sandbox has its own
+  network namespace, and a forwarder inside it (`src/agents/netns-forward.ts`)
+  reaches the proxy over a unix socket. Codex follows the proxy because its
+  throwaway home turns on `respect_system_proxy`; if it connects directly, the
+  sandbox refuses, so this fails closed. That throwaway home, under
+  `~/.cache/verdict` where other sandboxes can't read, holds only a copy of
+  `auth.json`. A refreshed login is copied back only if it is a regular file and
+  the same account (`tokens.account_id` and the id token's `sub`).
 
 `verdict check` runs the reviewed enforcers in the real repo, unsandboxed:
 they are code that passed the merge review.

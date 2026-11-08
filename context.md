@@ -142,3 +142,12 @@ dangling symlinks. Laws 3 (check's exit code) and 4 (error messages say what
 to do next) were also found false and are not fixed yet. The planner also
 noted that law 2's "never writes outside .verdict/" conflicts with scratch
 copies in TMPDIR; the wording is Pedram's call.
+
+## Codex egress (2026-11-08)
+
+Codex's shell could read the copied login and use Codex's network. Fixed by
+giving the app-server no network at all and an HTTPS-only CONNECT proxy to
+OpenAI's hosts; Codex is told to use it through `respect_system_proxy` in its
+throwaway config. Not verified live (this dev session can't run Codex or nest
+sandboxes): if Codex ignores the proxy it fails to connect rather than
+connecting directly. Check this on a real machine with VERDICT_AGENT=codex.
