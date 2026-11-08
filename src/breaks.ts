@@ -2,7 +2,7 @@
 // enforcer fail: removing a check, reordering a step, changing a value.
 // "A check you've never seen fail proves nothing." Breaks ship with the
 // enforcers, in .verdict/breaks/<law hash>.json, and `verdict plan` replays them.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { runEnforcer } from "./enforcers.ts";
@@ -49,7 +49,7 @@ export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Brea
   return withScratch(w.repo, async (copy) => {
     const c = inCopy(w, copy);
     const dir = c.dir;
-    const pinned = new Set(pinnedFiles(c, enforcer).map((f) => resolve(dir, f)));
+    const pinned = new Set(pinnedFiles(c, enforcer).map((f) => same(resolve(dir, f))));
     for (const e of brk.edits) {
       let file: string;
       try {
@@ -57,7 +57,7 @@ export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Brea
       } catch (err) {
         return { kind: "stale", reason: (err as Error).message };
       }
-      if (relative(dir, file).split(sep)[0] === ".verdict" || pinned.has(file)) {
+      if (relative(dir, file).split(sep)[0] === ".verdict" || pinned.has(same(file))) {
         return { kind: "stale", reason: `${e.path}: a break must change the system, not the enforcer or the config it runs under` };
       }
       if (!existsSync(file)) return { kind: "stale", reason: `${e.path} no longer exists` };
@@ -66,11 +66,18 @@ export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Brea
       if (count !== 1) return { kind: "stale", reason: `${e.path}: the text to replace occurs ${count} times, not once` };
       writeFileSync(file, text.replace(e.find, () => e.replace));
     }
-    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, sandbox: { readable: [w.repo] } });
+    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, sandbox: { readable: [w.repo] } });
     if (result.status === "fail") return { kind: "caught", result };
     if (result.status === "pass") return { kind: "missed", result };
     return { kind: "unknown", result };
   });
+}
+
+// One spelling per file, to compare paths: symlinks resolved, and case folded
+// where the filesystem ignores case (macOS and Windows by default).
+function same(p: string): string {
+  const real = existsSync(p) ? realpathSync(p) : p;
+  return process.platform === "darwin" || process.platform === "win32" ? real.toLowerCase() : real;
 }
 
 // Whether a break still applies to the code, without running anything: each
@@ -95,7 +102,7 @@ export function stale(w: Where, brk: Break): string | null {
 export async function runInScratch(w: Where, law: string, enforcer: Enforcer): Promise<Result> {
   return withScratch(w.repo, (copy) => {
     const c = inCopy(w, copy);
-    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, sandbox: { readable: [w.repo] } });
+    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, sandbox: { readable: [w.repo] } });
   });
 }
 

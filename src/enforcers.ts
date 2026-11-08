@@ -16,6 +16,7 @@ export interface Context {
   repo?: string; // the repository root (defaults to root): what may be read
   law: string;
   path: string; // enforcer file, relative to root
+  name?: string; // the one test to run, in a file that has others
   // Set while planning: root is a scratch copy, and every program runs in the
   // OS sandbox, writing only to root. `readable` is what else it may read.
   sandbox?: { readable: string[] };
@@ -77,30 +78,75 @@ function deps(root: string, repo = root): Record<string, string> {
   }
 }
 
-export function testCommand(root: string, file: string, repo = root): string[] | null {
+type TestRunner = "playwright" | "vitest" | "jest" | "bun" | "go" | "pytest" | "script";
+
+// Test names are matched as regular expressions by most runners: match this one exactly.
+const exactly = (name: string) => `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+
+export function testCommand(root: string, file: string, repo = root, name?: string): { runner: TestRunner; argv: string[] } | null {
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
     const d = deps(root, repo);
     const which = (r: string, bin: string) => findBin(r, bin, repo);
-    if (d["@playwright/test"] && /\.spec\./.test(file)) return [which(root, "playwright") ?? "playwright", "test", file];
-    if (d.vitest) return [which(root, "vitest") ?? "vitest", "run", file];
-    if (d.jest) return [which(root, "jest") ?? "jest", file];
-    return ["bun", "test", `./${file}`];
+    // JS runners match the full name ("describe block test name"), so the
+    // name is matched as a suffix rather than anchored at both ends.
+    const pattern = name ? exactly(name).slice(1) : "";
+    if (d["@playwright/test"] && /\.spec\./.test(file)) return { runner: "playwright", argv: [which(root, "playwright") ?? "playwright", "test", file, ...(name ? ["-g", pattern] : [])] };
+    if (d.vitest) return { runner: "vitest", argv: [which(root, "vitest") ?? "vitest", "run", file, ...(name ? ["-t", pattern] : [])] };
+    if (d.jest) return { runner: "jest", argv: [which(root, "jest") ?? "jest", file, ...(name ? ["-t", pattern] : [])] };
+    return { runner: "bun", argv: ["bun", "test", `./${file}`, ...(name ? ["-t", pattern] : [])] };
   }
-  if (/_test\.go$/.test(file)) return ["go", "test", `./${dirname(file)}`];
-  if (/(^|\/)test_[^/]*\.py$|_test\.py$/.test(file)) return ["python3", "-m", "pytest", file];
-  if (statSync(join(root, file)).mode & 0o111) return [`./${file}`];
+  if (/_test\.go$/.test(file)) return { runner: "go", argv: ["go", "test", "-v", `./${dirname(file)}`, ...(name ? ["-run", exactly(name)] : [])] };
+  if (/(^|\/)test_[^/]*\.py$|_test\.py$/.test(file)) return { runner: "pytest", argv: ["python3", "-m", "pytest", name ? `${file}::${name}` : file] };
+  if (name) return null; // a script is one test
+  if (statSync(join(root, file)).mode & 0o111) return { runner: "script", argv: [`./${file}`] };
   return null;
 }
 
+// How many tests passed, from the runner's summary; null if it can't tell.
+// A run where every test was skipped, filtered out or excluded exits 0 on
+// most runners, and a pass that ran nothing proves nothing.
+export function passedCount(runner: TestRunner, output: string): number | null {
+  const n = (re: RegExp) => {
+    const m = re.exec(output);
+    return m ? Number(m[1]) : null;
+  };
+  switch (runner) {
+    case "bun":
+      return n(/^\s*(\d+) pass\b/m);
+    case "vitest":
+      return /^\s*Tests\s/m.test(output) ? (n(/^\s*Tests\s.*?(\d+) passed/m) ?? 0) : null;
+    case "jest":
+      return /^Tests:/m.test(output) ? (n(/^Tests:.*?(\d+) passed/m) ?? 0) : null;
+    case "playwright":
+    case "pytest":
+      return n(/(\d+) passed/) ?? (/(\d+) skipped/.test(output) ? 0 : null);
+    case "go":
+      return /no tests to run/.test(output) ? 0 : (output.match(/^\s*--- PASS/gm)?.length ?? null);
+    case "script":
+      return null;
+  }
+}
+
 const test: Runner = async (ctx) => {
-  const { root, path } = ctx;
-  const argv = testCommand(root, path, ctx.repo ?? root);
-  if (!argv) return inconclusive(`don't know how to run ${path}`);
+  const { root, path, name } = ctx;
+  const cmd = testCommand(root, path, ctx.repo ?? root, name);
+  if (!cmd) {
+    return name
+      ? fail(`${path} is run as one script, so it can't select the test "${name}": remove the name from VERDICT.lock, or run \`verdict plan\``)
+      : inconclusive(`verdict can't tell how to run ${path}: name it *.test.ts, *_test.go, test_*.py or similar, or make it executable`);
+  }
+  const { runner, argv } = cmd;
   if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) {
     return inconclusive(`${argv[0]} is not installed: install it (or add it to the project's dev dependencies), then run verdict check again`);
   }
   const r = await run(ctx, argv);
-  if (r.code === 0) return pass();
+  if (r.code === 0) {
+    if (passedCount(runner, r.output) === 0) {
+      const what = name ? `the test "${name}" in ${path}` : path;
+      return fail(`${what} ran no tests: it is skipped, filtered out or excluded by the runner's config. Un-skip it, or run \`verdict plan\` if it moved\n${tail(r.output, 10)}`);
+    }
+    return pass();
+  }
   // 77 is the automake "skipped" code: a precondition the test needs is missing.
   if (r.code === SKIPPED) return inconclusive(`a precondition is missing\n${tail(r.output, 10)}`);
   return fail(tail(r.output));
@@ -232,6 +278,7 @@ export async function runEnforcer(kind: string, ctx: Context): Promise<Result> {
   // The planner only writes known kinds, so this is a hand edit or a typo:
   // a law that can't be checked is not a pass.
   if (!runner) return fail(`unknown enforcer kind "${kind}" in VERDICT.lock: fix it to one of ${KINDS.join(", ")}, or delete the entry and run \`verdict plan\``);
+  if (ctx.name && kind !== "test") return fail(`only test enforcers can name a test, but the ${kind} enforcer ${ctx.path} names "${ctx.name}": remove the name from VERDICT.lock, or run \`verdict plan\``);
   if (!existsSync(join(ctx.root, ctx.path))) return fail(`${ctx.path} is missing: restore it from git, or run \`verdict plan\` to plan the law again`);
   try {
     return await runner(ctx);

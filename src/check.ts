@@ -30,7 +30,7 @@ export async function checkLaw(w: Where, entry: LockEntry, opts: CheckOptions = 
   const details: LawReport["details"] = [];
   const breaks = opts.hash ? readBreaks(w.dir, opts.hash) : [];
   const run = async (e: Enforcer) => {
-    let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, sandbox: opts.sandbox });
+    let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, name: e.name, sandbox: opts.sandbox });
     const warnings: string[] = [];
     if (opts.replay !== false && result.status === "pass") result = await guard(w, entry.law, e, breaks, result, warnings);
     details.push({ kind: e.kind, path: e.path, result, scope: e.scope ?? scopeOf(w.dir, e.path), warnings });

@@ -56,10 +56,22 @@ export function inputsOf(w: Where, e: Enforcer): Inputs {
   return inputs;
 }
 
-// The files (not versions) among an enforcer's inputs, relative to the law's
-// directory. A break must change the system, never these.
+// Files a break may not edit, relative to the law's directory: the enforcer's
+// inputs, and every package.json its runner is picked from or its versions
+// are read from (only some fields of those are inputs, but a break that drops
+// vitest from package.json changes the runner, not the system).
 export function pinnedFiles(w: Where, e: Enforcer): string[] {
-  return Object.keys(inputsOf(w, e)).filter((k) => !k.includes("#"));
+  const files = new Set(Object.keys(inputsOf(w, e)).filter((k) => !k.includes("#")));
+  if (e.kind === "test" || DEPS[e.kind]) {
+    // The runner is picked from the law's directory up; versions from the file's.
+    for (const from of [w.dir, dirname(resolve(w.dir, e.path))]) {
+      for (let dir = from; dir.startsWith(w.repo); dir = dirname(dir)) {
+        if (existsSync(join(dir, "package.json"))) files.add(relative(w.dir, join(dir, "package.json")));
+        if (dir === w.repo || dir === dirname(dir)) break;
+      }
+    }
+  }
+  return [...files];
 }
 
 function nearest(from: string, name: string, repo: string): string | null {

@@ -66,11 +66,19 @@ test("a law that is false today needs a finding, not a weaker enforcer", async (
   expect(log).toContain("finding: the law looks false in today's code");
 });
 
-test("plan rejects enforcers outside .verdict/", async () => {
-  const root = repo({ "src/x.test.ts": "" });
-  const { ok, model } = await runPlan(root, [{ tool: "submit", input: { enforcers: [{ kind: "test", path: "src/x.test.ts" }], breaks: [], suggestions: [] } }]);
-  expect(ok).toBe(false);
-  expect(model.results.join("\n")).toContain("outside .verdict");
+test("outside .verdict/, plan accepts only a test the repo already has, with its scope", async () => {
+  const root = repo({ "src/x.test.ts": "", "src/rule.yml": "rules: []\n" });
+  const cases = [
+    [{ kind: "semgrep", path: "src/rule.yml", scope: "src/" }, "only a test the repo already has"],
+    [{ kind: "test", path: "src/x.test.ts" }, "give its scope"],
+    [{ kind: "test", path: "src/missing.test.ts", scope: "src/" }, "doesn't exist"],
+    [{ kind: "test", path: "../elsewhere.test.ts", scope: "src/" }, "outside"],
+  ] as const;
+  for (const [e, said] of cases) {
+    const { ok, model } = await runPlan(root, [{ tool: "submit", input: { enforcers: [e], breaks: [], suggestions: [] } }]);
+    expect(ok).toBe(false);
+    expect(model.results.join("\n")).toContain(said);
+  }
 });
 
 test("a break runs on a scratch copy of the working tree, never the repo", async () => {

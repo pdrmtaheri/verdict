@@ -34,6 +34,12 @@ Rules
 - Use the repo's own tooling when it is robust. Look at its config and
   dependencies first. Prefer installed tools; if the best tool is missing,
   still pick it and say so in suggestions.
+- Before writing a test, look for one the repo already has that checks the
+  law. If one does, point at it instead of copying it: its path (outside
+  ${OUT_DIR}/), the test's name if the file has others, and its scope in the
+  submission. Prove it like any enforcer: its break changes the code, never
+  the test or the runner's config. If it can't see a real violation, write
+  your own in ${OUT_DIR}/ and say what the existing one misses in suggestions.
 - When a law is about interleavings, concurrency, retries, crashes or "in any
   order", a test only covers the schedules you wrote down. If TLC is installed,
   model the design in TLA+ and check it, paired with a test generated from the
@@ -122,7 +128,12 @@ Enforcer kinds (the "kind" in submit) and their file formats
 
 If the law is too vague to check, suggest a rewrite.`;
 
-const EnforcerRef = z.object({ kind: z.enum(KINDS as [string, ...string[]]), path: z.string() });
+const EnforcerRef = z.object({
+  kind: z.enum(KINDS as [string, ...string[]]),
+  path: z.string().describe(`A file you wrote in ${OUT_DIR}/, or a test file the repo already has`),
+  name: z.string().optional().describe("For a test file the repo already has: the one test that enforces the law, by its name"),
+  scope: z.string().optional().describe(`What it covers. Required for a file outside ${OUT_DIR}/ (you can't add a scope line there)`),
+});
 
 const Submission = z.object({
   enforcers: z.array(EnforcerRef).min(1),
@@ -155,13 +166,26 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
   const notes: string[] = [];
   let failsToday = false;
   for (const e of sub.enforcers) {
+    let ours = true;
     try {
       inside(w.dir, e.path, join(w.dir, OUT_DIR));
-    } catch (err) {
-      return { problem: (err as Error).message, notes };
+    } catch {
+      ours = false;
     }
-    if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
-    if (!scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
+    if (!ours) {
+      // A test the project already has: verdict points at it and never edits it.
+      try {
+        inside(w.dir, e.path, w.repo);
+      } catch (err) {
+        return { problem: (err as Error).message, notes };
+      }
+      if (e.kind !== "test") return { problem: `${e.path} is outside ${OUT_DIR}/: only a test the repo already has can be used where it is; write a ${e.kind} enforcer in ${OUT_DIR}/`, notes };
+      if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} doesn't exist`, notes };
+      if (!e.scope) return { problem: `${e.path} is the repo's own file: give its scope in the submission`, notes };
+    } else {
+      if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
+      if (!e.scope && !scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
+    }
     const today = await runInScratch(w, law.text, e);
     if (today.status === "fail") {
       failsToday = true;
