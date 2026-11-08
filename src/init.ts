@@ -2,7 +2,7 @@
 // down in prose for people and agents (AGENTS.md, CLAUDE.md, CONTRIBUTING.md,
 // .cursor/rules…). It's a draft for a person to edit: verdict doesn't treat
 // those files as laws, because they change freely and mix rules with advice.
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { z } from "zod";
 import { runAgent } from "./agent.ts";
@@ -14,6 +14,15 @@ const FILES = [
   ".github/copilot-instructions.md", ".github/CONTRIBUTING.md", ".cursorrules", ".windsurfrules", ".clinerules",
 ];
 const DIRS = [".cursor/rules", ".claude/rules", ".github/instructions"];
+
+function lexists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // The prose rule files in a directory, relative to it.
 export function ruleFiles(dir: string): string[] {
@@ -48,7 +57,7 @@ const Draft = z.object({
 
 export async function init(w: Where, log: (line: string) => void): Promise<number> {
   const target = join(w.dir, "VERDICT.md");
-  if (existsSync(target)) {
+  if (lexists(target)) { // lstat: a dangling symlink counts too
     log(`${relative(w.repo, target) || "VERDICT.md"} already exists: edit it by hand, or move it aside and run \`verdict init\` again`);
     return 2;
   }
@@ -84,7 +93,14 @@ export async function init(w: Where, log: (line: string) => void): Promise<numbe
     ...draft.laws.map((l) => `<!-- from ${l.from} -->\n- ${l.text.replace(/\s+/g, " ").trim()}\n`),
     "",
   ].join("\n");
-  writeFileSync(target, md);
+  // "wx": create only. If anything appeared at the path meanwhile (a file or
+  // a symlink to anywhere), refuse rather than write through it.
+  try {
+    writeFileSync(target, md, { flag: "wx" });
+  } catch {
+    log(`${relative(w.repo, target) || "VERDICT.md"} appeared while drafting: move it aside and run \`verdict init\` again`);
+    return 2;
+  }
   log(`wrote ${relative(w.repo, target) || "VERDICT.md"} with ${draft.laws.length} law${draft.laws.length === 1 ? "" : "s"}: review and edit it, then run \`verdict plan\``);
   for (const s of draft.skipped) log(`  left out: ${s}`);
   return 0;

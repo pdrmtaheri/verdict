@@ -43,3 +43,13 @@ test("never overwrites a VERDICT.md, and says what to do without rule files", as
   expect(log.join("\n")).toContain("write VERDICT.md by hand");
   expect(started).toBe(0);
 });
+
+test("refuses to write through a VERDICT.md symlink, even a dangling one", async () => {
+  const { symlinkSync, existsSync } = await import("node:fs");
+  const root = repo({ "AGENTS.md": "- Never store money as a float.\n" });
+  const elsewhere = join(repo({}), "owned.txt");
+  symlinkSync(elsewhere, join(root, "VERDICT.md"));
+  agents.agent = scriptedAgent([{ tool: "submit", input: { laws: [{ text: "A law.", from: "AGENTS.md" }], skipped: [] } }]);
+  expect(await init(at(root), () => {})).toBe(2);
+  expect(existsSync(elsewhere)).toBe(false);
+});
