@@ -179,7 +179,9 @@ const RUNNABLE = new Set([
   "tlc", "java", "bun", "npx", "go", "python", "python3", "pytest", "cargo",
 ]);
 
-export function writeTools(root: string, outDir: string, repo = root) {
+// `claim` decides whether this planner may write a file: laws planned at the
+// same time must not overwrite each other's files. It returns a reason to refuse.
+export function writeTools(root: string, outDir: string, repo = root, claim: (abs: string) => string | null = () => null) {
   return {
     write_file: defineTool({
       description: `Create or overwrite a file. Only paths inside ${relative(root, outDir)}/ are allowed.`,
@@ -191,6 +193,8 @@ export function writeTools(root: string, outDir: string, repo = root) {
       execute: async ({ path, content, executable }) => {
         mkdirSync(outDir, { recursive: true });
         const abs = inside(root, path, outDir);
+        const refused = claim(abs);
+        if (refused) throw new Error(refused);
         mkdirSync(dirname(abs), { recursive: true });
         writeFileSync(abs, content, { mode: executable ? 0o755 : 0o644 });
         return `wrote ${relative(root, abs)}`;

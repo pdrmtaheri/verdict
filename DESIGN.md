@@ -109,12 +109,16 @@ no approval. Those are either inferred, run output, or the merge review's job.
     changed on purpose (cite the evidence, suggest editing the law), or the code
     breaks the law (a finding).
   A law that simply fails today is reported, not re-planned: that's a finding,
-  not drift. Suggestions that would mean changing the system are printed, not
+  not drift. Laws, from every VERDICT.md, are planned in parallel, up to
+  `VERDICT_JOBS` at once (default 4; each is one agent session). A planner
+  may write only new files or files its own law owns, so parallel planners
+  can't overwrite each other. Each law's results print as one block. Suggestions that would mean changing the system are printed, not
   written to the lock.
 - `verdict check`: run every law's enforcers (all laws by default). Per law, the
   result is pass, fail or inconclusive, with a message quoting the law. A pass
   prints each enforcer's scope. Exit 0 when everything passes, 1 on any failure.
-  Also reports laws that aren't planned or whose hash is stale.
+  Also reports laws that aren't planned or whose hash is stale. Laws run in
+  parallel under the same `VERDICT_JOBS` limit; output keeps VERDICT.md's order.
 
 ## Every check must be seen to fail
 

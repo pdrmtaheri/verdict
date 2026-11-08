@@ -2,6 +2,7 @@ import { runEnforcer, scopeOf } from "./enforcers.ts";
 import type { Law } from "./laws.ts";
 import type { Lock, LockEntry } from "./lock.ts";
 import type { Where } from "./where.ts";
+import { jobs, makeLimit, type Limit } from "./limit.ts";
 import { combine, type Result, type Status } from "./result.ts";
 
 export interface LawReport {
@@ -34,12 +35,13 @@ export async function checkLaw(w: Where, entry: LockEntry, sandbox?: { readable:
   return { law: entry.law, status: combine(details.map((d) => d.result)), details };
 }
 
-export async function check(w: Where, laws: Law[], lock: Lock): Promise<LawReport[]> {
+// Laws run in parallel, up to the limit (VERDICT_JOBS); results keep VERDICT.md's order.
+export async function check(w: Where, laws: Law[], lock: Lock, limit: Limit = makeLimit(jobs())): Promise<LawReport[]> {
   return Promise.all(
     laws.map((law) => {
       const entry = lock.get(law.hash);
       if (!entry) return { law: law.text, status: "unplanned" as const, details: [] };
-      return checkLaw(w, entry);
+      return limit(() => checkLaw(w, entry));
     }),
   );
 }

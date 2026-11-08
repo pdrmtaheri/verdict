@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { check, exitCode, format, summarize, type LawReport } from "./check.ts";
+import { check, exitCode, format, summarize } from "./check.ts";
 import { findSets, shown } from "./sets.ts";
-import { plan } from "./plan.ts";
+import { jobs, makeLimit } from "./limit.ts";
+import { Claims, plan } from "./plan.ts";
 
 const USAGE = `usage: verdict <command> [path...]
 
@@ -19,6 +20,7 @@ Agents: verdict runs its planner and judges on a coding agent you're logged into
   VERDICT_MODEL      that agent's model name (e.g. haiku, gpt-6.1-terra,
                      anthropic/claude-haiku-5-5 for Pi); its default if unset
   VERDICT_REASONING  low | medium | high (default high to plan, medium to judge)
+  VERDICT_JOBS       how many laws to plan or check at once (default 4)
 Decision models (jev): TYPESAFE_AI_API_KEY; VERDICT_DECISION_MODEL
                      (default jev-1.14.0)`;
 
@@ -38,21 +40,25 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const many = sets.length > 1;
+  // One limit for everything, so VERDICT_JOBS bounds the whole run.
+  const limit = makeLimit(jobs());
   if (command === "plan") {
-    let ok = true;
-    for (const set of sets) {
-      if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
-      ok = (await plan(set, set.lockFile, set.laws, set.lock, console.log)) && ok;
-    }
-    return ok ? 0 : 1;
+    const claims = new Claims(sets);
+    // Laws from every VERDICT.md run together; each line says which file it's from.
+    const results = await Promise.all(
+      sets.map((set) => {
+        const prefix = many ? `[${shown(repo, set.lawsFile)}] ` : "";
+        return plan(set, set.lockFile, set.laws, set.lock, (line) => console.log(prefix + line.replaceAll("\n", `\n${prefix}`)), { limit, claims });
+      }),
+    );
+    return results.every(Boolean) ? 0 : 1;
   }
-  const all: LawReport[] = [];
-  for (const set of sets) {
-    const reports = await check(set, set.laws, set.lock);
+  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));
+  sets.forEach((set, i) => {
     if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
-    console.log(format(reports, !many));
-    all.push(...reports);
-  }
+    console.log(format(reports[i]!, !many));
+  });
+  const all = reports.flat();
   if (many) console.log(`\n${summarize(all)}`);
   return exitCode(all);
 }

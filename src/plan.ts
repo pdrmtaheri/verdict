@@ -11,6 +11,7 @@ import type { Result } from "./result.ts";
 import { reproveLaw, type Reproof } from "./reprove.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
 import { label, type Where } from "./where.ts";
+import { jobs, makeLimit, type Limit } from "./limit.ts";
 
 export const OUT_DIR = ".verdict";
 
@@ -36,7 +37,8 @@ Rules
   point a user has (UI, CLI, API), every code path that writes the guarded state.
 - Keep each enforcer cheap to rerun: seconds, a few minutes at most. Choose
   bounds (model depth, input sizes) to fit.
-- Name files ${OUT_DIR}/<short-slug>.<ext>.
+- Name files ${OUT_DIR}/<short-slug>.<ext>. Other laws are planned at the same
+  time; if a name is taken, write_file says so: pick another.
 
 Every enforcer file states its scope
 - Near the top, a comment line "scope: <what this covers, its bounds and
@@ -194,7 +196,7 @@ function planTools(w: Where, law: Law) {
   };
 }
 
-export async function planLaw(w: Where, law: Law, context = ""): Promise<PlanOutcome> {
+export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: string) => string | null): Promise<PlanOutcome> {
   const installed = PROBE.filter((t) => which(w.dir, t));
   const where =
     w.dir === w.repo
@@ -206,7 +208,7 @@ export async function planLaw(w: Where, law: Law, context = ""): Promise<PlanOut
   const submission = await runAgent({
     system: SYSTEM,
     prompt: `Law: ${law.text}\n\n${where}\n\nInstalled tools: ${installed.join(", ") || "none"}${context ? `\n\n${context}` : ""}`,
-    tools: { ...readTools(w.dir, w.repo), ...writeTools(w.dir, join(w.dir, OUT_DIR), w.repo), ...planTools(w, law) },
+    tools: { ...readTools(w.dir, w.repo), ...writeTools(w.dir, join(w.dir, OUT_DIR), w.repo, claim), ...planTools(w, law) },
     cwd: w.dir,
     submit: {
       description: "Submit the enforcers for this law, with a break for each one that passes today.",
@@ -281,48 +283,95 @@ function logReproof(r: Reproof, log: (line: string) => void): void {
   }
 }
 
+// Who owns which file in .verdict/ while laws are planned at the same time.
+// A file belongs to the law whose lock entry names it, or to the planner that
+// wrote it first in this run; a planner may write new files and its own.
+export class Claims {
+  private owner = new Map<string, string>();
+
+  constructor(entries: { dir: string; lock: Lock }[] = []) {
+    for (const { dir, lock } of entries) {
+      for (const [hash, entry] of lock) for (const e of entry.enforcers) this.owner.set(join(dir, e.path), hash);
+    }
+  }
+
+  for(hash: string): (abs: string) => string | null {
+    return (abs) => {
+      const owner = this.owner.get(abs);
+      if (owner && owner !== hash) return `${abs} belongs to another law; pick another file name`;
+      this.owner.set(abs, hash);
+      return null;
+    };
+  }
+}
+
+export interface PlanOptions {
+  limit?: Limit; // shared across VERDICT.md files; defaults to VERDICT_JOBS
+  claims?: Claims;
+}
+
 // Brings the lock in line with VERDICT.md and the code, like a package
 // manager's sync: laws that are new or reworded get planned; planned laws get
 // their breaks replayed on today's code, and the ones that drifted (a break no
 // longer applies, or an enforcer can't see it) get re-planned. Laws that fail
 // today are reported, not re-planned: that is a finding, not drift.
 // Entries for removed laws are dropped.
+//
+// Laws run in parallel, up to the limit. Each law's results are logged as one
+// block when it finishes; the lock is written after each law.
 export async function plan(
   w: Where,
   lockFile: string,
   laws: Law[],
   lock: Lock,
   log: (line: string) => void,
+  opts: PlanOptions = {},
 ): Promise<boolean> {
+  const limit = opts.limit ?? makeLimit(jobs());
+  const claims = opts.claims ?? new Claims([{ dir: w.dir, lock }]);
   let ok = true;
+  let stopped = false;
   writeLock(lockFile, lock, laws);
-  for (const law of laws) {
-    let context = "";
-    if (lock.has(law.hash)) {
-      const r = await reproveLaw(w, law, lock);
-      logReproof(r, log);
-      if (r.outcome !== "drift") continue;
-      context = await triageContext(w, law, lock, r);
-      log(`  re-planning`);
-    } else {
-      log(`planning: ${law.text}`);
-    }
-    let outcome: PlanOutcome;
+
+  const one = async (law: Law) => {
+    if (stopped) return;
+    const lines: string[] = [];
+    const say = (line: string) => lines.push(line);
     try {
-      outcome = await planLaw(w, law, context);
-    } catch (err) {
-      // e.g. a missing API key: the same error would repeat for every law.
-      log(`  error: ${err instanceof Error ? err.message : String(err)}`);
-      return false;
+      let context = "";
+      if (lock.has(law.hash)) {
+        const r = await reproveLaw(w, law, lock);
+        logReproof(r, say);
+        if (r.outcome !== "drift") return;
+        context = await triageContext(w, law, lock, r);
+        say(`  re-planning`);
+      } else {
+        log(`planning: ${law.text}`);
+        say(`planned: ${law.text}`);
+      }
+      let outcome: PlanOutcome;
+      try {
+        outcome = await planLaw(w, law, context, claims.for(law.hash));
+      } catch (err) {
+        // e.g. not logged in: the same error would repeat for every law.
+        say(`  error: ${err instanceof Error ? err.message : String(err)}`);
+        stopped = true;
+        ok = false;
+        return;
+      }
+      logOutcome(outcome, say);
+      if (!outcome.entry) {
+        ok = false;
+        return;
+      }
+      lock.set(law.hash, outcome.entry);
+      writeBreaks(w.dir, law.hash, outcome.breaks);
+      writeLock(lockFile, lock, laws);
+    } finally {
+      if (lines.length) log(lines.join("\n"));
     }
-    logOutcome(outcome, log);
-    if (!outcome.entry) {
-      ok = false;
-      continue;
-    }
-    lock.set(law.hash, outcome.entry);
-    writeBreaks(w.dir, law.hash, outcome.breaks);
-    writeLock(lockFile, lock, laws);
-  }
+  };
+
+  await Promise.all(laws.map((law) => limit(() => one(law))));
   return ok;
 }
