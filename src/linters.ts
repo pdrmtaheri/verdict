@@ -14,7 +14,7 @@ export interface LintContext {
   config: string; // the config file, relative to root
   rule: string;
   scope: string; // globs relative to root, separated by spaces or commas
-  run: (argv: string[]) => Promise<ExecResult>;
+  run: (argv: string[], env?: Record<string, string>) => Promise<ExecResult>;
   bin: (name: string) => string | null;
 }
 
@@ -43,9 +43,9 @@ const parse = (r: ExecResult): unknown => {
 };
 
 const ESLINT_PROBE = `
-const [pkg, config, rule, ...files] = process.argv.slice(1);
+const [config, rule, ...files] = process.argv.slice(1);
 (async () => {
-  const { ESLint } = require(pkg);
+  const { ESLint } = require("eslint");
   const eslint = new ESLint({ cwd: process.cwd(), overrideConfigFile: config });
   const off = [];
   for (const f of files) {
@@ -69,8 +69,10 @@ const eslint: Linter = {
   async off(ctx, exe, files) {
     const node = ctx.bin("node");
     if (!node) return null;
-    const pkg = dirname(dirname(realpathSync(exe))); // node_modules/eslint/bin/eslint.js
-    const r = await ctx.run([node, "-e", ESLINT_PROBE, "--", pkg, ctx.config, ctx.rule, ...files]);
+    // The same eslint that lints: node_modules/eslint/bin/eslint.js. NODE_PATH
+    // makes require("eslint") find it, after any node_modules from root up.
+    const modules = dirname(dirname(dirname(realpathSync(exe))));
+    const r = await ctx.run([node, "-e", ESLINT_PROBE, "--", ctx.config, ctx.rule, ...files], { NODE_PATH: modules });
     const out = r.code === 0 ? parse(r) : null;
     return Array.isArray(out) ? (out as string[]) : null;
   },

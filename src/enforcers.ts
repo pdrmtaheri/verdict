@@ -165,7 +165,7 @@ const lint: Runner = async (ctx) => {
   if (!rule || !scope) return fail(`the lint enforcer ${path} needs a rule and a scope in VERDICT.lock: run \`verdict plan\` to re-plan the law`);
   const warnings: string[] = [];
   const r = await runLint(
-    { root, config: path, rule, scope, run: (argv) => run(ctx, argv), bin: (name) => findBin(root, name, ctx.repo ?? root) },
+    { root, config: path, rule, scope, run: (argv, env) => run(ctx, argv, [], env), bin: (name) => findBin(root, name, ctx.repo ?? root) },
     (w) => warnings.push(w),
   );
   return warnings.length ? { ...r, warnings } : r;
