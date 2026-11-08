@@ -5,8 +5,8 @@
 // config it runs under, the version of the tool it needs), and `check`
 // replays the break of any enforcer whose inputs changed since.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import type { Enforcer } from "./lock.ts";
 import type { Where } from "./where.ts";
 
@@ -40,6 +40,7 @@ export function inputsOf(w: Where, e: Enforcer): Inputs {
   };
   const file = resolve(w.dir, e.path);
   add(file);
+  for (const helper of helpersOf(w, file)) add(helper);
   if (e.kind === "tla") add(file.replace(/\.tla$/, ".cfg"));
   for (const name of CONFIG[e.kind] ?? []) {
     const found = nearest(dirname(file), name, w.repo);
@@ -72,6 +73,24 @@ export function pinnedFiles(w: Where, e: Enforcer): string[] {
     }
   }
   return [...files];
+}
+
+// Other files in the law's .verdict/ that the enforcer names (a runner script,
+// a fixture, a shared module): what it runs depends on them too. Matched by
+// file name, which over-pins rather than misses.
+function helpersOf(w: Where, file: string): string[] {
+  const dir = join(w.dir, ".verdict");
+  if (!file.startsWith(dir + "/") || !existsSync(file)) return [];
+  const text = readFileSync(file, "utf8");
+  const out: string[] = [];
+  for (const f of readdirSync(dir, { recursive: true }) as string[]) {
+    const abs = join(dir, f);
+    if (abs === file || f.startsWith("breaks/") || !statSync(abs).isFile()) continue;
+    const name = basename(f);
+    const stem = name.replace(/\.[cm]?[jt]sx?$/, "");
+    if (text.includes(name) || (stem !== name && new RegExp(`["'/]${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(text))) out.push(abs);
+  }
+  return out;
 }
 
 function nearest(from: string, name: string, repo: string): string | null {

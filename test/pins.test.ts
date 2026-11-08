@@ -109,3 +109,14 @@ test("the lock keeps name, scope and inputs", () => {
   expect(readLock(file)).toEqual(lock);
   expect(readFileSync(file, "utf8")).toContain("- test: tests/money.test.ts");
 });
+
+test("helpers an enforcer in .verdict/ names are among its inputs", () => {
+  const root = repo({
+    ".verdict/a.test.ts": '// scope: x\nimport { go } from "./runner";\nconst f = join(import.meta.dir, "fixture.json");\n',
+    ".verdict/runner.ts": "export const go = 1;\n",
+    ".verdict/fixture.json": "{}",
+    ".verdict/unrelated.ts": "",
+    ".verdict/breaks/abc.json": "[]",
+  });
+  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).sort()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
+});

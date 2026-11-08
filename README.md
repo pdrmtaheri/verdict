@@ -16,7 +16,7 @@ See [DESIGN.md](DESIGN.md) for the full design.
   Linux ([bubblewrap](https://github.com/containers/bubblewrap)). Without one,
   verdict refuses to run the code and the enforcer is reported inconclusive.
 - Optional, depending on what the planner picks: [Semgrep](https://semgrep.dev)
-  for pattern enforcers, the project's own eslint or ruff for lint enforcers,
+  for pattern enforcers, the project's own eslint, oxlint or ruff for lint enforcers,
   and `TYPESAFE_AI_API_KEY` for decision-model (jev) judges.
 
 ## Install
@@ -94,7 +94,7 @@ an enforcer drifts. Editing a law's words marks it unplanned until you do.
 verdict doesn't duplicate what a project already enforces. When a test the
 repo already has checks a law, the planner points at it (with the test's name,
 if the file has others) instead of writing a new one, and verdict never edits
-it. When the project's eslint or ruff config already has a rule for a law, a
+it. When the project's eslint, oxlint or ruff config already has a rule for a law, a
 `lint` enforcer points at that config and rule. Either way the enforcer must be
 seen to fail on a break, like any other.
 
@@ -135,7 +135,7 @@ break before the plan is accepted.
 | Kind | What it is | Runs with | Needs |
 |---|---|---|---|
 | `semgrep` | A Semgrep rule file, for laws about the shape of the code | `semgrep` | [Semgrep](https://semgrep.dev) installed |
-| `lint` | A rule the project's linter already has: its config file, the rule id and a scope | eslint or ruff, inferred from the config file's name | That linter installed |
+| `lint` | A rule the project's linter already has: its config file, the rule id and a scope | eslint, oxlint or ruff, inferred from the config file's name | That linter installed |
 | `test` | A test file, for laws about behaviour (unit, property, fuzz, E2E); generated, or one the project already has | Inferred from the file name and the repo's tooling (below) | That runner installed |
 | `tla` | A TLA+ spec, for invariants worth proving | TLC | `tlc` on PATH, or `VERDICT_TLA2TOOLS` set to `tla2tools.jar` (also needs Java) |
 | `decision` | A JSON file that gathers state with a shell command and asks a jev decision model to rule pass, fail or inconclusive | `experimental_decide` | `TYPESAFE_AI_API_KEY` |
@@ -212,6 +212,7 @@ are in [DESIGN.md](DESIGN.md#confinement-while-planning).
 ```sh
 bun test
 bun run typecheck
+bun run lint
 ```
 
 verdict checks itself: its own laws are in [VERDICT.md](VERDICT.md).

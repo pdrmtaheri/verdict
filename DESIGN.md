@@ -177,6 +177,7 @@ for enforcers verdict doesn't own (a project's own tests and linter config),
 which people edit without thinking about verdict, but it applies to all.
 
 So the lock records each enforcer's inputs: a fingerprint of its file, of the
+other `.verdict/` files it names (a runner script, a fixture), and of the
 config files it runs under (vitest/jest/playwright configs, bunfig.toml,
 pyproject.toml, go.mod, a TLA+ spec's .cfg, the lint config), and the version
 package.json asks for of its runner or linter packages. `plan` records them
@@ -212,7 +213,7 @@ All four observe from outside.
 
 | Kind | Covers | Ships with | Picked when the law is… |
 |---|---|---|---|
-| Lint / pattern | Semgrep for rules verdict writes (type-aware rules: see below); a rule the project's own linter already has (eslint, ruff) | Should-flag / should-pass tests in the tool's own format; for an existing rule, its break | About the shape of the code |
+| Lint / pattern | Semgrep for rules verdict writes (type-aware rules: see below); a rule the project's own linter already has (eslint, oxlint, ruff) | Should-flag / should-pass tests in the tool's own format; for an existing rule, its break | About the shape of the code |
 | Tests | Unit, property, fuzz, E2E, DST, spec-generated; or a test the project already has | Nothing extra: the test is the example | About behaviour |
 | Proofs / models | TLA+, Bend | Nothing extra: a checker verifies it | An invariant worth proving |
 | Judges | LLM, decision models (jev) | Evals | Readable but not mechanical (copy, docs, transcripts) |
@@ -382,7 +383,7 @@ How each kind runs. These rules are inferred, not configured:
 | Kind | Command | Pass / fail / inconclusive |
 |---|---|---|
 | semgrep | `semgrep scan --config <file> --error` over the whole repo | exit 0 / 1 / other, or semgrep missing |
-| lint | The linter the config file belongs to (eslint, ruff), under that config, over the scope's files; first asks it whether the rule applies to each file | no findings for the rule / findings, or the rule off for any file / linter missing or can't say |
+| lint | The linter the config file belongs to (eslint, oxlint, ruff), under that config, over the scope's files; first asks it whether the rule applies to each file | no findings for the rule / findings, or the rule off for any file / linter missing or can't say |
 | test | Inferred from the file name: `*.test.*`/`*.spec.*` → vitest, jest, playwright or bun test (from package.json); `*_test.go` → go test; `test_*.py` → pytest; an executable file → run it. A `name` selects one test | exit 0 / non-zero, or exit 0 with no test run / 77 (automake's "skipped": a precondition is missing) or runner missing |
 | tla | TLC (`tlc` on PATH or `VERDICT_TLA2TOOLS` jar); `<spec>.cfg` next to it | exit 0 / 10–14 (violations) / other |
 | decision | `sh -c state_from`, then one choice question | see Judges |
@@ -413,10 +414,10 @@ Gaps in v1:
 - Type-based enforcement suggestions (later iteration).
 - Linter conventions: baselines, severity, autofix. (Suppressions are warned
   about, and SARIF is the one output format besides text.)
-- Lint enforcers for linters other than eslint and ruff (golangci-lint,
+- Lint enforcers for linters other than eslint, oxlint and ruff (golangci-lint,
   clippy, biome…); until then, an executable test runs them.
-- Helpers a `.verdict/` enforcer imports are not among its inputs; edits to
-  them show up in review as changes to `.verdict/`.
+- A `.verdict/` enforcer's helpers are found by name (other `.verdict/` files
+  its text mentions), not by resolving imports.
 
 ## Prior art to keep in mind
 
