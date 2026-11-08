@@ -1,0 +1,67 @@
+import { expect, test } from "bun:test";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { runInScratch } from "../src/breaks.ts";
+import { bwrapArgs, macProfile } from "../src/sandbox.ts";
+import { checkGitArgs, inside, writeTools } from "../src/tools.ts";
+import { repo } from "./helpers.ts";
+
+const live = process.env.VERDICT_SANDBOX !== "off";
+
+test("the macOS profile denies writes, home reads and the network except what's given", () => {
+  const p = macProfile({ readable: ["/r"], writable: ["/w"], network: false }, "/Users/me");
+  expect(p).toContain("(deny file-write*)");
+  expect(p).toContain('(allow file-write* (subpath "/w"))');
+  expect(p).toContain('(deny file-read* (subpath "/Users/me"))');
+  expect(p).toContain('(allow file-read* (subpath "/r"))');
+  expect(p).toContain("(deny network*)");
+  expect(macProfile({ readable: [], writable: [], network: true }, "/Users/me")).not.toContain("(deny network*)");
+});
+
+test("the bubblewrap arguments hide home, bind only what's given, and cut the network", () => {
+  const a = bwrapArgs({ readable: [], writable: ["/w"], network: false }, "/home/me", "/w");
+  expect(a.join(" ")).toContain("--tmpfs /home/me");
+  expect(a.join(" ")).toContain("--bind /w /w");
+  expect(a).toContain("--unshare-net");
+});
+
+test.skipIf(!live)("live: planner-written code can't write to the repo or see verdict's environment", async () => {
+  const root = repo({
+    ".verdict/escape.sh": `#!/bin/sh\n# scope: probe\necho "$SECRET_FOR_TEST"\ntouch "${"$"}REPO/escaped" && exit 1\nexit 0\n`,
+  }, [".verdict/escape.sh"]);
+  process.env.SECRET_FOR_TEST = "hunter2";
+  const r = await runInScratch(root, "law", { kind: "test", path: ".verdict/escape.sh" });
+  delete process.env.SECRET_FOR_TEST;
+  expect(r.message).not.toContain("hunter2");
+  expect(existsSync(join(root, "escaped"))).toBe(false);
+});
+
+test.skipIf(!live)("live: the planner's run tool can't write outside its scratch copy", async () => {
+  const root = repo({ ".verdict/w.sh": `#!/bin/sh\necho x > ${JSON.stringify(join(homedir(), ".verdict-sandbox-probe"))}\n` }, [".verdict/w.sh"]);
+  const out = await writeTools(root, join(root, ".verdict")).run.execute({ argv: ["./.verdict/w.sh"] } as never);
+  expect(out).not.toContain("exit 0");
+  expect(existsSync(join(homedir(), ".verdict-sandbox-probe"))).toBe(false);
+});
+
+test("git allows only listed flags per subcommand", () => {
+  const root = repo({ "a.txt": "" });
+  expect(() => checkGitArgs(root, ["log", "--oneline", "-n", "5", "--", "a.txt"])).not.toThrow();
+  expect(() => checkGitArgs(root, ["blame", "-L", "1,3", "a.txt"])).not.toThrow();
+  expect(() => checkGitArgs(root, ["blame", "-S/etc/hosts", "a.txt"])).toThrow("not allowed");
+  expect(() => checkGitArgs(root, ["diff", "--output=/tmp/x"])).toThrow("not allowed");
+  expect(() => checkGitArgs(root, ["diff", "--no-index", "/etc/hosts", "a.txt"])).toThrow("not allowed");
+  expect(() => checkGitArgs(root, ["log", "--orderfile=/etc/hosts"])).toThrow("not allowed");
+  expect(() => checkGitArgs(root, ["push"])).toThrow("not allowed");
+});
+
+test("write_file refuses a dangling symlink in .verdict/", async () => {
+  const root = repo({ "a.txt": "" });
+  mkdirSync(join(root, ".verdict"));
+  const target = join(process.env.TMPDIR!, `verdict-dangling-${Date.now()}.txt`);
+  symlinkSync(target, join(root, ".verdict", "link.txt"));
+  expect(() => inside(root, ".verdict/link.txt", join(root, ".verdict"))).toThrow("symlink to nowhere");
+  await expect(writeTools(root, join(root, ".verdict")).write_file.execute({ path: ".verdict/link.txt", content: "x" } as never)).rejects.toThrow();
+  expect(existsSync(target)).toBe(false);
+  writeFileSync(join(root, "a.txt"), "still fine");
+});

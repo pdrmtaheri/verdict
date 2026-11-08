@@ -5,8 +5,9 @@ import { dirname, join } from "node:path";
 import { experimental_decide } from "ai";
 import { z } from "zod";
 import { runAgent } from "./agent.ts";
-import { exec, tail, which } from "./exec.ts";
-import { decisionModel, languageModel } from "./models.ts";
+import { exec, tail, which, type ExecResult } from "./exec.ts";
+import { sandboxed, sandboxFailure, SandboxUnavailable } from "./sandbox.ts";
+import { decisionModel } from "./models.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { readTools } from "./tools.ts";
 
@@ -14,6 +15,21 @@ export interface Context {
   root: string;
   law: string;
   path: string; // enforcer file, relative to root
+  // Set while planning: root is a scratch copy, and every program runs in the
+  // OS sandbox, writing only to root. `readable` is what else it may read.
+  sandbox?: { readable: string[] };
+}
+
+// Runs a program for an enforcer, in the sandbox when the context asks for one.
+async function run(ctx: Context, argv: string[], extraReadable: string[] = []): Promise<ExecResult> {
+  if (!ctx.sandbox) return exec(argv, { cwd: ctx.root });
+  const box = sandboxed(argv, { readable: [ctx.root, ...ctx.sandbox.readable, ...extraReadable], writable: [ctx.root], network: false }, ctx.root);
+  const r = await exec(box.argv, { cwd: ctx.root, env: box.env, cleanEnv: true });
+  const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
+  if (broken) {
+    throw new SandboxUnavailable(`couldn't start verdict's sandbox (${broken}). If verdict itself already runs in a sandbox, set VERDICT_SANDBOX=off`);
+  }
+  return r;
 }
 
 type Runner = (ctx: Context) => Promise<Result>;
@@ -22,10 +38,11 @@ type Runner = (ctx: Context) => Promise<Result>;
 // The only pattern-rule engine. Type-aware rules run as tests (see plan.ts).
 // Exit 0 = pass, 1 = findings, anything else = semgrep itself failed.
 
-const semgrep: Runner = async ({ root, path }) => {
+const semgrep: Runner = async (ctx) => {
+  const { root, path } = ctx;
   const exe = which(root, "semgrep");
   if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
-  const r = await exec([exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"], { cwd: root });
+  const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"]);
   if (r.code === 0) return pass();
   if (r.code === 1) return fail(tail(r.output));
   return inconclusive(`semgrep exited ${r.code}\n${tail(r.output)}`);
@@ -55,23 +72,31 @@ export function testCommand(root: string, file: string): string[] | null {
   return null;
 }
 
-const test: Runner = async ({ root, path }) => {
+const test: Runner = async (ctx) => {
+  const { root, path } = ctx;
   const argv = testCommand(root, path);
   if (!argv) return inconclusive(`don't know how to run ${path}`);
   if (!argv[0]!.startsWith("./") && !which(root, argv[0]!)) return inconclusive(`${argv[0]} is not installed`);
-  const r = await exec(argv, { cwd: root });
-  return r.code === 0 ? pass() : fail(tail(r.output));
+  const r = await run(ctx, argv);
+  if (r.code === 0) return pass();
+  // 77 is the automake "skipped" code: a precondition the test needs is missing.
+  if (r.code === SKIPPED) return inconclusive(`a precondition is missing\n${tail(r.output, 10)}`);
+  return fail(tail(r.output));
 };
+
+export const SKIPPED = 77;
 
 // ---------------------------------------------------------------- TLA+
 // TLC exit codes: 0 ok, 10-14 a property was violated, others are errors.
 
-const tla: Runner = async ({ root, path }) => {
+const tla: Runner = async (ctx) => {
+  const { root, path } = ctx;
   const jar = process.env.VERDICT_TLA2TOOLS;
   const tlc = Bun.which("tlc") ? ["tlc"] : jar ? ["java", "-cp", jar, "tlc2.TLC"] : null;
   if (!tlc) return inconclusive("TLC is not installed (put tlc on PATH or set VERDICT_TLA2TOOLS to tla2tools.jar)");
-  const meta = mkdtempSync(join(tmpdir(), "verdict-tlc-"));
-  const r = await exec([...tlc, "-workers", "auto", "-metadir", meta, path], { cwd: root });
+  // TLC's state files go inside root when sandboxed, the only place it may write.
+  const meta = mkdtempSync(ctx.sandbox ? join(root, ".tlc-") : join(tmpdir(), "verdict-tlc-"));
+  const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], jar ? [jar] : []);
   if (r.code === 0) return pass();
   if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
   return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);
@@ -82,15 +107,17 @@ const tla: Runner = async ({ root, path }) => {
 // always pass / fail / inconclusive, so no mapping is needed.
 
 const DecisionFile = z.object({
+  scope: z.string().optional(),
   state_from: z.string(),
   instructions: z.string(),
   criteria: z.object({ pass: z.string(), fail: z.string(), inconclusive: z.string() }),
   min_probability: z.number().min(0).max(1).default(0.85),
 });
 
-const decision: Runner = async ({ root, path }) => {
+const decision: Runner = async (ctx) => {
+  const { root, path } = ctx;
   const spec = DecisionFile.parse(JSON.parse(readFileSync(join(root, path), "utf8")));
-  const state = await exec(["sh", "-c", spec.state_from], { cwd: root });
+  const state = await run(ctx, ["sh", "-c", spec.state_from]);
   if (state.code !== 0) return inconclusive(`state_from exited ${state.code}\n${tail(state.output)}`);
   if (state.output === "") return pass("state_from produced nothing to judge");
   const result = await experimental_decide({
@@ -124,15 +151,42 @@ const Verdict = z.object({
 const llm: Runner = async ({ root, law, path }) => {
   const hints = readFileSync(join(root, path), "utf8");
   const verdict = await runAgent({
-    model: languageModel(),
     system: JUDGE_SYSTEM,
     prompt: `Law: ${law}\n\nNotes from the plan:\n${hints}`,
     tools: readTools(root),
+    cwd: root,
     submit: { description: "Report your verdict on the law.", schema: Verdict },
   });
   if (!verdict) return inconclusive("the judge did not reach a verdict");
   return { status: verdict.status, message: verdict.reason };
 };
+
+// ---------------------------------------------------------------- scope
+// Every enforcer file says what it covers: a "scope:" line near the top in
+// any comment style, or a "scope" field in JSON. `check` prints it on a pass,
+// because a pass covers the model, the bound or the files named, not the system.
+
+export function scopeOf(root: string, path: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(join(root, path), "utf8");
+  } catch {
+    return null;
+  }
+  if (path.endsWith(".json")) {
+    try {
+      const scope = JSON.parse(text).scope;
+      return typeof scope === "string" ? scope : null;
+    } catch {
+      return null;
+    }
+  }
+  for (const line of text.split("\n").slice(0, 20)) {
+    const m = /\bscope:\s*(.+?)\s*(-->|\*\/)?\s*$/i.exec(line);
+    if (m) return m[1]!;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------- registry
 

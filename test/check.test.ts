@@ -6,12 +6,13 @@ import { check, checkLaw, exitCode } from "../src/check.ts";
 import { parseLaws } from "../src/laws.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";
 import { overrides } from "../src/models.ts";
+import { overrides as agents } from "../src/agent.ts";
 import { plan } from "../src/plan.ts";
 import { inside } from "../src/tools.ts";
-import { repo, scriptedModel } from "./helpers.ts";
+import { repo, scriptedAgent } from "./helpers.ts";
 
 afterEach(() => {
-  delete overrides.language;
+  delete agents.agent;
   delete overrides.decision;
 });
 
@@ -60,15 +61,15 @@ test("a missing enforcer file fails the law", async () => {
 
 test("the LLM judge reads the repo and reports its verdict", async () => {
   const root = repo({ "src/price.ts": "export const price = 9.99;\n", ".verdict/money.judge.md": "Look in src/." });
-  const model = scriptedModel([
+  const model = scriptedAgent([
     { tool: "read_file", input: { path: "src/price.ts" } },
     { tool: "submit", input: { status: "fail", reason: "src/price.ts:1 stores 9.99 as a float" } },
   ]);
-  overrides.language = model;
+  agents.agent = model;
   const r = await checkLaw(root, { law, enforcers: [{ kind: "llm", path: ".verdict/money.judge.md" }] });
   expect(r.status).toBe("fail");
   expect(r.details[0]!.result.message).toContain("src/price.ts:1");
-  expect(JSON.stringify(model.prompts.at(-1))).toContain("export const price = 9.99");
+  expect(model.results.join("\n")).toContain("export const price = 9.99");
 });
 
 const decisionFile = JSON.stringify({
@@ -80,8 +81,8 @@ const decisionFile = JSON.stringify({
 test("a confident decision model skips the LLM judge", async () => {
   const root = repo({ "msgs.txt": "Try again later.", ".verdict/e.decision.json": decisionFile, ".verdict/e.judge.md": "" });
   overrides.decision = decisionModel("pass", 0.95);
-  const judge = scriptedModel([]);
-  overrides.language = judge;
+  const judge = scriptedAgent([]);
+  agents.agent = judge;
   const r = await checkLaw(root, { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
   expect(r.status).toBe("pass");
   expect(judge.prompts.length).toBe(0);
@@ -90,7 +91,7 @@ test("a confident decision model skips the LLM judge", async () => {
 test("an unsure decision model falls back to the LLM judge", async () => {
   const root = repo({ "msgs.txt": "Oops.", ".verdict/e.decision.json": decisionFile, ".verdict/e.judge.md": "" });
   overrides.decision = decisionModel("fail", 0.6);
-  overrides.language = scriptedModel([{ tool: "submit", input: { status: "fail", reason: "msgs.txt:1 gives no next step" } }]);
+  agents.agent = scriptedAgent([{ tool: "submit", input: { status: "fail", reason: "msgs.txt:1 gives no next step" } }]);
   const r = await checkLaw(root, { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
   expect(r.status).toBe("fail");
   expect(r.details.map((d) => d.kind)).toEqual(["llm"]);
@@ -111,32 +112,6 @@ test("tool paths can't leave the repo or, for writes, .verdict/", () => {
   expect(inside(root, ".verdict/x.yml", root)).toBe(join(root, ".verdict/x.yml"));
 });
 
-test("plan writes enforcers and the lock; check then runs them", async () => {
-  const root = repo({ "VERDICT.md": `- ${law}\n` });
-  const laws = parseLaws(readFileSync(join(root, "VERDICT.md"), "utf8"));
-  overrides.language = scriptedModel([
-    { tool: "write_file", input: { path: ".verdict/money.sh", content: "#!/bin/sh\nexit 0\n", executable: true } },
-    { tool: "submit", input: { enforcers: [{ kind: "test", path: ".verdict/money.sh" }], suggestions: ["Add a Cents type"] } },
-  ]);
-  const lockFile = join(root, "VERDICT.lock");
-  const log: string[] = [];
-  expect(await plan(root, lockFile, laws, new Map(), (l) => log.push(l))).toBe(true);
-  expect(log.join("\n")).toContain("suggestion: Add a Cents type");
-  expect(log.join("\n")).not.toContain("false in today's code");
-  expect(log.join("\n")).not.toContain("inconclusive");
-  const lock = readLock(lockFile);
-  expect(lock.get(laws[0]!.hash)).toEqual({ law, enforcers: [{ kind: "test", path: ".verdict/money.sh" }] });
-});
-
-test("plan rejects enforcers outside .verdict/", async () => {
-  const root = repo({ "src/x.test.ts": "" });
-  const laws = parseLaws(`- ${law}`);
-  overrides.language = scriptedModel([{ tool: "submit", input: { enforcers: [{ kind: "test", path: "src/x.test.ts" }], suggestions: [] } }]);
-  const log: string[] = [];
-  expect(await plan(root, join(root, "VERDICT.lock"), laws, new Map(), (l) => log.push(l))).toBe(false);
-  expect(log.join("\n")).toContain("outside .verdict");
-});
-
 test("the lock round-trips and drops removed laws", () => {
   const root = repo({});
   const laws = parseLaws(`- ${law}\n- Gone soon.`);
@@ -152,8 +127,41 @@ test("the planner may run its own scripts in .verdict/, but nothing else outside
   const { writeTools } = await import("../src/tools.ts");
   const root = repo({ ".verdict/t.sh": "#!/bin/sh\necho hi\n", "evil.sh": "#!/bin/sh\necho no\n" }, [".verdict/t.sh", "evil.sh"]);
   const run = writeTools(root, join(root, ".verdict")).run;
-  const call = (argv: string[]) => run.execute!({ argv }, { toolCallId: "t", messages: [] } as never);
+  const call = (argv: string[]) => run.execute({ argv } as never);
   expect(await call(["./.verdict/t.sh"])).toContain("hi");
   await expect(call(["./evil.sh"])).rejects.toThrow("outside .verdict");
   await expect(call(["curl", "example.com"])).rejects.toThrow("not allowed");
+});
+
+test("grep skips tracked symlinks that point outside the repo; git rejects writing flags", async () => {
+  const { readTools } = await import("../src/tools.ts");
+  const { symlinkSync, writeFileSync, mkdtempSync } = await import("node:fs");
+  const outside = mkdtempSync(join(process.env.TMPDIR!, "verdict-outside-"));
+  writeFileSync(join(outside, "secret.txt"), "TOKEN=hunter2\n");
+  const root = repo({ "a.txt": "hello\n" });
+  symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"));
+  Bun.spawnSync(["git", "init", "-q"], { cwd: root });
+  Bun.spawnSync(["git", "add", "-A"], { cwd: root });
+  const tools = readTools(root);
+  expect(await tools.list_files.execute({} as never)).toContain("link.txt");
+  const opts = { toolCallId: "t", messages: [] } as never;
+  expect(await tools.grep.execute({ pattern: "TOKEN" } as never)).toBe("(no matches)");
+  await expect(tools.git.execute({ args: ["diff", "--output=/tmp/x"] } as never)).rejects.toThrow("not allowed");
+  await expect(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] } as never)).rejects.toThrow("not allowed");
+  await expect(tools.git.execute({ args: ["blame", "--ignore-revs-file=/etc/hosts", "a.txt"] } as never)).rejects.toThrow("not allowed");
+  await expect(tools.git.execute({ args: ["diff", outside] } as never)).rejects.toThrow("outside");
+  expect(await tools.git.execute({ args: ["ls-files", "a.txt"] } as never)).toContain("a.txt");
+});
+
+test("tool input is validated before a tool runs, whichever agent calls it", async () => {
+  const { callTool, defineTool } = await import("../src/agent.ts");
+  const { z } = await import("zod");
+  let ran = false;
+  const t = defineTool({ description: "", schema: z.object({ path: z.string() }), execute: async () => ((ran = true), "ok") });
+  const bad = await callTool(t, { path: 42 });
+  expect(bad.isError).toBe(true);
+  expect(ran).toBe(false);
+  expect(await callTool(t, { path: "a" })).toEqual({ text: "ok", isError: false });
+  const boom = defineTool({ description: "", schema: z.object({}), execute: async () => { throw new Error("nope"); } });
+  expect(await callTool(boom, {})).toEqual({ text: "nope", isError: true });
 });

@@ -1,4 +1,4 @@
-import { runEnforcer } from "./enforcers.ts";
+import { runEnforcer, scopeOf } from "./enforcers.ts";
 import type { Law } from "./laws.ts";
 import type { Lock, LockEntry } from "./lock.ts";
 import { combine, type Result, type Status } from "./result.ts";
@@ -6,16 +6,16 @@ import { combine, type Result, type Status } from "./result.ts";
 export interface LawReport {
   law: string;
   status: Status | "unplanned";
-  details: { kind: string; path: string; result: Result }[];
+  details: { kind: string; path: string; result: Result; scope: string | null }[];
 }
 
 // Runs a law's enforcers. An LLM judge next to a decision model is its
 // fallback: it runs only when the decision model is inconclusive.
-export async function checkLaw(root: string, entry: LockEntry): Promise<LawReport> {
+export async function checkLaw(root: string, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {
   const details: LawReport["details"] = [];
   const run = async (kind: string, path: string) => {
-    const result = await runEnforcer(kind, { root, law: entry.law, path });
-    details.push({ kind, path, result });
+    const result = await runEnforcer(kind, { root, law: entry.law, path, sandbox });
+    details.push({ kind, path, result, scope: scopeOf(root, path) });
     return result;
   };
 
@@ -56,8 +56,8 @@ export function format(reports: LawReport[]): string {
     out.push(`${LABEL[r.status]}  ${r.law}`);
     if (r.status === "unplanned") out.push(`              run \`verdict plan\` (new law, or its wording changed)`);
     for (const d of r.details) {
-      if (d.result.status === "pass" && !d.result.message) continue;
-      out.push(`              ${d.kind} ${d.path}: ${d.result.status}`);
+      const scope = d.scope ? ` (scope: ${d.scope})` : "";
+      out.push(`              ${d.kind} ${d.path}: ${d.result.status}${d.result.status === "pass" ? scope : ""}`);
       for (const line of d.result.message.split("\n")) if (line) out.push(`                ${line}`);
     }
   }

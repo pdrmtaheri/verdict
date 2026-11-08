@@ -68,6 +68,18 @@ detail that an LLM proposes.
   explicitly rejected using Anthropic's SDK. TanStack AI was the alternative;
   the AI SDK won on maturity and because it has `experimental_decide` with a
   TypeSafe (jev) provider.
+- Model routing (2026-11-08): verdict runs on coding agents the user is
+  already logged into (Claude Code, Codex, Pi), like bb (github.com/get-bb/bb):
+  Claude Agent SDK for Claude Code, `codex app-server` JSON-RPC with dynamic
+  tools for Codex, and Pi's SDK for Pi. How it got here: Vercel AI Gateway
+  first (its free tier blocks every model worth using; the one free model is
+  capped at 5 requests a minute), then OpenRouter (dropped), then the community
+  AI SDK provider for Claude Code (worked), then Pedram asked to drop the
+  gateway and the AI SDK route and copy bb. The AI SDK provider for Pi
+  couldn't take custom tools; Pi's own SDK can.
+- jev stays, through TypeSafe's own provider (TYPESAFE_AI_API_KEY). That is
+  the one model dependency outside the three agents, and the only reason the
+  `ai` package is still installed.
 - jev became the generic `decision` kind. The file's `accept_if` / `otherwise`
   were removed: choices are always pass/fail/inconclusive, and the fallback is
   any `llm` enforcer in the same entry.
@@ -100,3 +112,33 @@ detail that an LLM proposes.
   holds proofs (AI-written), and `bend PROOF.bend` checks them. In one reported
   trial, 4 of ~20 agent-proposed laws turned out to be false, which is why
   `verdict plan` should flag laws that are false in today's code.
+
+## Borrowed from pstack's verification skills (2026-11-08)
+
+From create/maintain-(formal-)verification-skill, Pedram took:
+- Every enforcer must be seen to fail on a break (plan rejects it otherwise).
+- Findings stay findings: never weaken an enforcer to pass.
+- Scope line in every enforcer file; check prints it.
+- E2E proof standards in the planner prompt; exit 77 = inconclusive.
+- Re-proving on today's code to catch vacuous passes. First built as a
+  separate `verdict audit`; Pedram rejected that: "why can't it be the same as
+  plan", like package managers where sync and update are one command over one
+  lockfile. So `plan` is the sync: plan new laws, re-prove planned ones, re-plan
+  drift. Don't reintroduce a separate audit/maintain command.
+Skipped: the feature map (VERDICT.md is that), launch/doctor sections (tests
+own their setup), a stored sync commit (inferred from git), one PR per pass (a
+trigger).
+
+## verdict's planner attacked verdict (2026-11-08)
+
+The first real `plan` on verdict's own VERDICT.md (Claude Code, Haiku) found
+law 2 (agent tools stay in the repo; the planner writes only in .verdict/)
+false, with working exploits: `run` allowed `bun -e`/`python3 -c`; planner-
+written tests and `state_from` ran unconfined; `git blame -S<file>` read
+outside the repo; write_file followed a dangling symlink; Codex's shell could
+read anywhere. Fixed with an OS sandbox around everything the planner causes
+to run (src/sandbox.ts), a per-subcommand git flag allowlist, and refusing
+dangling symlinks. Laws 3 (check's exit code) and 4 (error messages say what
+to do next) were also found false and are not fixed yet. The planner also
+noted that law 2's "never writes outside .verdict/" conflicts with scratch
+copies in TMPDIR; the wording is Pedram's call.

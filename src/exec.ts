@@ -15,13 +15,14 @@ export function which(root: string, bin: string): string | null {
 
 export async function exec(
   argv: string[],
-  opts: { cwd: string; timeoutMs?: number; env?: Record<string, string> },
+  // cleanEnv: run with exactly `env`, not the parent's environment plus `env`.
+  opts: { cwd: string; timeoutMs?: number; env?: Record<string, string>; cleanEnv?: boolean },
 ): Promise<ExecResult> {
   const proc = Bun.spawn(argv, {
     cwd: opts.cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...opts.env },
+    env: opts.cleanEnv ? opts.env : { ...process.env, ...opts.env },
     timeout: opts.timeoutMs ?? 10 * 60_000,
   });
   const [stdout, stderr, code] = await Promise.all([

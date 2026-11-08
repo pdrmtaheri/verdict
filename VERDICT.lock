@@ -1,1 +1,20 @@
-{}
+7c91d875:
+  law: Only src/agents/ and src/models.ts talk to a coding agent or a model
+    provider; everything else goes through runAgent() or decisionModel().
+  enforcers:
+    - test: .verdict/provider-boundary.test.ts
+ba64ed02:
+  law: An agent's file tools never read or write outside the repository, and the
+    planner never writes outside .verdict/.
+  enforcers:
+    - test: .verdict/agent-read-boundary.test.ts
+    - test: .verdict/planner-write-boundary.test.ts
+    - llm: .verdict/agent-builtin-tools.judge.md
+408cc85a:
+  law: "`verdict check` exits 0 only when no law fails and every law is planned."
+  enforcers:
+    - test: .verdict/check-exit-code.test.ts
+a3b28a29:
+  law: Error messages tell the user what to do next.
+  enforcers:
+    - llm: .verdict/error-messages-next-step.judge.md

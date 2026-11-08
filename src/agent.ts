@@ -1,34 +1,108 @@
-// A tool loop that ends when the model calls its `submit` tool.
-import { generateText, hasToolCall, isStepCount, tool, type LanguageModel, type ToolSet } from "ai";
-import type { z } from "zod";
+// verdict runs its agents (the planner, the LLM judge) on a coding agent the
+// user already has and is logged into: Claude Code, Codex or Pi. Each one runs
+// its own tool loop; verdict hands it verdict's tools and reads back the
+// `submit` call. The agents' own built-in tools are switched off, so the same
+// confinement applies whichever agent runs.
+import { z } from "zod";
 
-export interface AgentOptions<S extends z.ZodType> {
-  model: LanguageModel;
-  system: string;
-  prompt: string;
-  tools: ToolSet;
-  submit: { description: string; schema: S };
-  maxSteps?: number;
-  reasoning?: "low" | "medium" | "high";
+export interface Tool {
+  description: string;
+  schema: z.ZodObject;
+  execute: (input: never) => Promise<string>;
+}
+export type Tools = Record<string, Tool>;
+
+export function defineTool<S extends z.ZodObject>(t: {
+  description: string;
+  schema: S;
+  execute: (input: z.infer<S>) => Promise<string>;
+}): Tool {
+  return t as unknown as Tool;
 }
 
-export async function runAgent<S extends z.ZodType>(opts: AgentOptions<S>): Promise<z.infer<S> | null> {
+// Validates the agent's input against the schema, then runs the tool. Errors
+// come back as text for the agent to read, never as exceptions.
+export async function callTool(tool: Tool, input: unknown): Promise<{ text: string; isError: boolean }> {
+  const parsed = tool.schema.safeParse(input);
+  if (!parsed.success) return { text: `invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
+  try {
+    return { text: await tool.execute(parsed.data as never), isError: false };
+  } catch (err) {
+    return { text: err instanceof Error ? err.message : String(err), isError: true };
+  }
+}
+
+export type Reasoning = "low" | "medium" | "high";
+
+export interface AgentTask {
+  system: string;
+  prompt: string;
+  tools: Tools;
+  cwd: string;
+  maxSteps: number;
+  reasoning: Reasoning;
+  model?: string; // the agent's own model name; its default when unset
+}
+
+export interface Agent {
+  name: string;
+  run(task: AgentTask): Promise<void>;
+}
+
+// Tests swap in a scripted agent here.
+export const overrides: { agent?: Agent } = {};
+
+export const AGENTS = ["claude-code", "codex", "pi"] as const;
+
+async function pickAgent(): Promise<Agent> {
+  if (overrides.agent) return overrides.agent;
+  const name = process.env.VERDICT_AGENT ?? "claude-code";
+  switch (name) {
+    case "claude-code":
+      return (await import("./agents/claude-code.ts")).claudeCode;
+    case "codex":
+      return (await import("./agents/codex.ts")).codex;
+    case "pi":
+      return (await import("./agents/pi.ts")).pi;
+    default:
+      throw new Error(`VERDICT_AGENT=${name} is not one of ${AGENTS.join(", ")}`);
+  }
+}
+
+export interface AgentOptions<S extends z.ZodObject> {
+  system: string;
+  prompt: string;
+  tools: Tools;
+  cwd: string;
+  // Returning a string rejects the submission; the agent sees it and can retry.
+  submit: { description: string; schema: S; validate?: (input: z.infer<S>) => Promise<string | null> };
+  maxSteps?: number;
+  reasoning?: Reasoning;
+}
+
+// Runs a task until the agent's `submit` call is accepted or the agent stops.
+export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Promise<z.infer<S> | null> {
   let submitted: z.infer<S> | null = null;
-  const submit = tool({
+  const submit = defineTool({
     description: opts.submit.description,
-    inputSchema: opts.submit.schema,
-    execute: async (input: z.infer<S>) => {
+    schema: opts.submit.schema,
+    execute: async (input) => {
+      if (submitted) return "already accepted. You are done; stop here.";
+      const problem = (await opts.submit.validate?.(input)) ?? null;
+      if (problem) return `rejected: ${problem}\nFix it and call submit again.`;
       submitted = input;
-      return "received";
+      return "accepted. You are done; stop here.";
     },
   });
-  await generateText({
-    model: opts.model,
-    system: opts.system,
+  const agent = await pickAgent();
+  await agent.run({
+    system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
     prompt: opts.prompt,
     tools: { ...opts.tools, submit },
-    stopWhen: [hasToolCall("submit"), isStepCount(opts.maxSteps ?? 40)],
-    reasoning: opts.reasoning ?? "medium",
+    cwd: opts.cwd,
+    maxSteps: opts.maxSteps ?? 40,
+    reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
+    model: process.env.VERDICT_MODEL,
   });
   return submitted;
 }

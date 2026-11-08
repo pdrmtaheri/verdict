@@ -80,14 +80,49 @@ no approval. Those are either inferred, run output, or the merge review's job.
 
 ## Commands
 
-- `verdict plan`: for each law not in the lock, or whose hash changed: pick
-  enforcer(s), generate them with their tests or evals, and write the lock entry.
-  Suggestions that would mean changing the system (see below) are printed, not
+- `verdict plan`: sync the lock with VERDICT.md and the code, the way a
+  package manager syncs its lockfile. One command does three things:
+  - plans each law that is new, or whose hash changed: picks enforcer(s),
+    generates them, and proves each one can fail (see "Every check must be seen
+    to fail");
+  - re-proves each planned law on today's code by replaying its breaks; this
+    needs no model except for judges;
+  - re-plans a law that drifted: a break no longer applies, or an enforcer
+    passes on code broken on purpose. The planner then sorts the cause: the
+    enforcer no longer describes the code (fix it from the code), the promise
+    changed on purpose (cite the evidence, suggest editing the law), or the code
+    breaks the law (a finding).
+  A law that simply fails today is reported, not re-planned: that's a finding,
+  not drift. Suggestions that would mean changing the system are printed, not
   written to the lock.
 - `verdict check`: run every law's enforcers (all laws by default). Per law, the
-  result is pass, fail or inconclusive, with a message quoting the law. Exit 0
-  when everything passes, 1 on any failure. Also reports laws that aren't
-  planned or whose hash is stale.
+  result is pass, fail or inconclusive, with a message quoting the law. A pass
+  prints each enforcer's scope. Exit 0 when everything passes, 1 on any failure.
+  Also reports laws that aren't planned or whose hash is stale.
+
+## Every check must be seen to fail
+
+A check you have never seen fail proves nothing. For each enforcer that passes
+on today's code, the planner submits a break: a small edit to the system under
+check that violates the law the way it would really be broken, such as removing
+a check, reordering two steps, or using a float. verdict applies it to a scratch
+copy of the working tree, never to the repo, and won't accept the plan until the
+enforcer fails there. For Semgrep this goes beyond its should-flag examples:
+those test the rule, while the break tests the rule's reach into the real code.
+For judges, the break is the eval.
+
+Breaks ship with the enforcers in `.verdict/breaks/<law hash>.json`, as
+`{enforcer, description, edits: [{path, find, replace}]}`. They are not in the
+lock. The commit at which a law was last proven is inferred from git (the last
+commit that touched its breaks file), not stored.
+
+Findings stay findings. If a law is false today, the planner must not weaken the
+enforcer, its scope or its bounds until it passes. It submits the enforcer
+failing, with the counterexample as steps in the code's own words.
+
+Every enforcer file states its scope: a `scope:` line near the top (a `scope`
+field in JSON), saying what it covers, its bounds and assumptions, and what it
+leaves out. A pass covers that scope, not the system.
 
 ## Enforcer kinds
 
@@ -184,19 +219,59 @@ person to act on, and they never go in the lock:
 
 ## Implementation (v1)
 
-TypeScript on Bun. `bun src/cli.ts plan|check`. Models go through the Vercel
-AI SDK, so no provider is built in. IDs are `provider:model` and are set by
-`VERDICT_MODEL` (default `anthropic:claude-opus-5-5`) and `VERDICT_DECISION_MODEL`
-(default `typesafe:jev-latest`). Registered providers: anthropic, openai, google,
-typesafe, and gateway for everything else. Decision models use the SDK's
-`experimental_decide`.
+TypeScript on Bun. `bun src/cli.ts plan|check`.
+
+verdict runs its agents (the planner and the LLM judge) on a coding agent the
+user already has and is logged into, the way bb does: no model API keys and no
+AI library in between. `VERDICT_AGENT` picks one, and `VERDICT_MODEL` is that
+agent's own model name. Each adapter (`src/agents/`) runs one task: it gives the
+agent verdict's tools and lets the agent run its own loop until `submit` is
+accepted.
+
+| Agent | Talks to | verdict's tools reach it as | Built-in tools |
+|---|---|---|---|
+| claude-code (default) | Claude Agent SDK | an in-process MCP server | off (`tools: []`); the user's MCP servers, settings and hooks are ignored |
+| codex | `codex app-server`, JSON-RPC 2.0 on stdio | dynamic tools (experimental API) | its shell can't be switched off, so threads run in a read-only sandbox with approvals off: it can read anything but write nothing |
+| pi | Pi's SDK (`@earendil-works/pi-coding-agent`), in process | custom tools | off (`noTools: "all"` plus an allowlist); no extensions, skills, prompt templates or context files; in-memory session |
+
+Tool input is validated against the tool's zod schema in verdict
+(`callTool`), whichever agent calls it.
+
+### Confinement while planning
+
+The planner reads text from the repo, so a comment in the repo can steer it.
+Everything it can cause to run is therefore confined:
+
+- Code it runs (its tests and scripts, programs called through `run`, a
+  decision file's `state_from`, enforcers already in the lock when `plan`
+  re-proves them) runs on a scratch copy of the working tree, inside an OS
+  sandbox (`src/sandbox.ts`): macOS `sandbox-exec`, Linux bubblewrap. Inside,
+  it can write only to the scratch copy, can't read the user's home beyond the
+  repo and the tools on PATH, gets a scrubbed environment with a fresh HOME,
+  and has no network except localhost. With no sandbox available verdict
+  refuses to run the code (the enforcer is inconclusive). `VERDICT_SANDBOX=off`
+  turns it off, for when verdict itself already runs in a sandbox (macOS
+  sandboxes don't nest).
+- File tools resolve every path, refuse anything outside the repo, refuse
+  dangling symlinks, and `write_file` writes only in `.verdict/`.
+- The git tool allows a fixed list of flags per subcommand.
+- Codex's app-server runs in the same sandbox (with network, and write access
+  only to Codex's own state directory), since its shell can't be switched off.
+
+`verdict check` runs the reviewed enforcers in the real repo, unsandboxed:
+they are code that passed the merge review.
+
+Decision models (jev) go through TypeSafe's own AI SDK provider
+(`TYPESAFE_AI_API_KEY`) and the SDK's `experimental_decide`, the only use of
+the `ai` package. `VERDICT_DECISION_MODEL` defaults to `jev-1.14.0`, pinned
+because `jev-latest` changes results on each release.
 
 How each kind runs. These rules are inferred, not configured:
 
 | Kind | Command | Pass / fail / inconclusive |
 |---|---|---|
 | semgrep | `semgrep scan --config <file> --error` over the whole repo | exit 0 / 1 / other, or semgrep missing |
-| test | Inferred from the file name: `*.test.*`/`*.spec.*` → vitest, jest, playwright or bun test (from package.json); `*_test.go` → go test; `test_*.py` → pytest; an executable file → run it | exit 0 / non-zero / runner missing |
+| test | Inferred from the file name: `*.test.*`/`*.spec.*` → vitest, jest, playwright or bun test (from package.json); `*_test.go` → go test; `test_*.py` → pytest; an executable file → run it | exit 0 / non-zero / 77 (automake's "skipped": a precondition is missing) or runner missing |
 | tla | TLC (`tlc` on PATH or `VERDICT_TLA2TOOLS` jar); `<spec>.cfg` next to it | exit 0 / 10–14 (violations) / other |
 | decision | `sh -c state_from`, then one choice question | see Judges |
 | llm | A tool loop with read_file, list_files, grep and read-only git; ends with a submit tool | the judge's answer |
@@ -204,14 +279,18 @@ How each kind runs. These rules are inferred, not configured:
 Within a law: any fail → fail, else any inconclusive → inconclusive. `check`
 exits 1 if a law fails or isn't planned. Inconclusive doesn't fail the run.
 
-The planner is the same tool loop, plus `write_file`, which is confined to
+The planner is the same tool loop, plus `run_enforcer`, `try_break` (a break on
+a scratch copy) and `write_file`, which is confined to
 `.verdict/`, and `run`, which runs allowlisted programs (semgrep, test runners,
 tlc, type-aware tools) or its own scripts in `.verdict/`, with no shell, so it
-can validate what it wrote. After writing a lock
-entry, `plan` runs the law once and flags it if it's false today.
+can validate what it wrote. Its `submit` is checked before it's accepted: each
+enforcer is inside `.verdict/`, has a scope line, and either fails today (with a
+finding) or fails on its break. A rejected submit goes back to the planner with
+the reason.
 
 Gaps in v1:
-- Judge evals are not generated or run yet. There is no consumer for them.
+- A judge's eval is its break, run at plan time. There is no larger eval set
+  yet, so `min_probability` isn't tuned per law.
 - Files in `.verdict/` are not cleaned up when a law is removed. The lock entry
   is.
 - Hashes are 8 hex characters.

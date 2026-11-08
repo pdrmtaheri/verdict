@@ -1,8 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { LanguageModel } from "ai";
-import { MockLanguageModelV4 } from "ai/test";
+import { callTool, type Agent } from "../src/agent.ts";
 
 export function repo(files: Record<string, string>, executable: string[] = []): string {
   const root = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "verdict-test-"));
@@ -14,29 +13,26 @@ export function repo(files: Record<string, string>, executable: string[] = []): 
   return root;
 }
 
-const usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-  outputTokens: { total: 1, text: 1, reasoning: undefined },
-};
-
-// A model that makes the given tool calls, one per step, in order.
-export function scriptedModel(calls: { tool: string; input: unknown }[]): LanguageModel & { prompts: unknown[] } {
-  let step = 0;
-  const prompts: unknown[] = [];
-  const model = new MockLanguageModelV4({
-    doGenerate: async (options) => {
-      prompts.push(options.prompt);
-      const call = calls[step++];
-      if (!call) {
-        return { content: [{ type: "text", text: "done" }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] };
+// An agent that makes the given tool calls in order, and stops once a submit
+// is accepted. It records the prompts it got and every tool result.
+export function scriptedAgent(calls: { tool: string; input: unknown }[]): Agent & { prompts: string[]; results: string[] } {
+  const prompts: string[] = [];
+  const results: string[] = [];
+  const agent: Agent = {
+    name: "scripted",
+    async run(task) {
+      prompts.push(task.prompt);
+      for (const c of calls) {
+        const t = task.tools[c.tool];
+        if (!t) {
+          results.push(`no tool ${c.tool}`);
+          continue;
+        }
+        const r = await callTool(t, c.input);
+        results.push(r.text);
+        if (c.tool === "submit" && r.text.startsWith("accepted")) break;
       }
-      return {
-        content: [{ type: "tool-call", toolCallId: `call-${step}`, toolName: call.tool, input: JSON.stringify(call.input) }],
-        finishReason: { unified: "tool-calls", raw: undefined },
-        usage,
-        warnings: [],
-      };
     },
-  });
-  return Object.assign(model, { prompts });
+  };
+  return Object.assign(agent, { prompts, results });
 }
