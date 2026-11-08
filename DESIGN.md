@@ -108,6 +108,8 @@ no approval. Those are either inferred, run output, or the merge review's job.
     enforcer no longer describes the code (fix it from the code), the promise
     changed on purpose (cite the evidence, suggest editing the law), or the code
     breaks the law (a finding).
+  `verdict plan --again <law>` plans a law afresh even when it's in sync (for
+  example once TLC is installed); `<law>` is a hash prefix or part of its text.
   A law that passed when it was planned and fails now is re-planned the same
   way: it's a regression, or an enforcer that depended on something incidental
   (an exact message, a path). A law that already failed when it was planned

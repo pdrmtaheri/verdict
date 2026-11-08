@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { check, exitCode, format, summarize } from "./check.ts";
 import { findSets, shown } from "./sets.ts";
+import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
 import { Claims, plan } from "./plan.ts";
 
@@ -9,6 +10,8 @@ const USAGE = `usage: verdict <command> [path...]
   plan    sync the lock: plan new or reworded laws, re-prove planned ones on
           today's code (each enforcer must still fail on its break), and
           re-plan the ones that drifted
+          --again <law>  plan this law afresh even if it's in sync; <law> is
+                         a hash prefix or part of its text (repeatable)
   check   run every law's enforcers; exit 1 if any law fails or isn't planned
 
 Laws live in VERDICT.md files: any directory can have one, and its laws apply
@@ -25,7 +28,19 @@ Decision models (jev): TYPESAFE_AI_API_KEY; VERDICT_DECISION_MODEL
                      (default jev-1.14.0)`;
 
 async function main(argv: string[]): Promise<number> {
-  const [command, ...paths] = argv;
+  const [command, ...rest] = argv;
+  const paths: string[] = [];
+  const again: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    if (a === "--again") {
+      const value = rest[++i];
+      if (!value) return usageError("--again needs a law: a hash prefix or part of the law's text");
+      again.push(value);
+    } else if (a.startsWith("--again=")) again.push(a.slice("--again=".length));
+    else paths.push(a);
+  }
+  if (again.length > 0 && command !== "plan") return usageError("--again only works with `verdict plan`");
   if (command !== "plan" && command !== "check") {
     console.log(USAGE);
     return command === undefined || command === "help" || command === "--help" ? 0 : 2;
@@ -44,11 +59,19 @@ async function main(argv: string[]): Promise<number> {
   const limit = makeLimit(jobs());
   if (command === "plan") {
     const claims = new Claims(sets);
+    const matches = (sel: string, law: Law) =>
+      (/^[0-9a-f]{4,8}$/.test(sel) && law.hash.startsWith(sel)) || law.text.toLowerCase().includes(sel.toLowerCase());
+    for (const sel of again) {
+      if (!sets.some((set) => set.laws.some((law) => matches(sel, law)))) {
+        return usageError(`--again ${JSON.stringify(sel)} matches no law: use a hash prefix from VERDICT.lock or a phrase from the law`);
+      }
+    }
+    const replan = (law: Law) => again.some((sel) => matches(sel, law));
     // Laws from every VERDICT.md run together; each line says which file it's from.
     const results = await Promise.all(
       sets.map((set) => {
         const prefix = many ? `[${shown(repo, set.lawsFile)}] ` : "";
-        return plan(set, set.lockFile, set.laws, set.lock, (line) => console.log(prefix + line.replaceAll("\n", `\n${prefix}`)), { limit, claims });
+        return plan(set, set.lockFile, set.laws, set.lock, (line) => console.log(prefix + line.replaceAll("\n", `\n${prefix}`)), { limit, claims, again: replan });
       }),
     );
     return results.every(Boolean) ? 0 : 1;
@@ -61,6 +84,11 @@ async function main(argv: string[]): Promise<number> {
   const all = reports.flat();
   if (many) console.log(`\n${summarize(all)}`);
   return exitCode(all);
+}
+
+function usageError(message: string): number {
+  console.error(`${message}\n(run \`verdict help\` for usage)`);
+  return 2;
 }
 
 process.exit(await main(process.argv.slice(2)));

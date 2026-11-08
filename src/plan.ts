@@ -320,7 +320,14 @@ export class Claims {
 export interface PlanOptions {
   limit?: Limit; // shared across VERDICT.md files; defaults to VERDICT_JOBS
   claims?: Claims;
+  again?: (law: Law) => boolean; // re-plan these even if they're in sync
 }
+
+const AGAIN = `A person asked for this law to be planned again, though it is already
+planned. Its current enforcers are listed below. Plan it afresh with what is
+available now (for example, TLC may be installed where it wasn't before):
+keep what is good, replace what a stronger enforcer would do better, and say
+what you changed and why in suggestions. Never weaken an enforcer.`;
 
 // Brings the lock in line with VERDICT.md and the code, like a package
 // manager's sync: laws that are new or reworded get planned; planned laws get
@@ -352,7 +359,12 @@ export async function plan(
     const say = (line: string) => lines.push(line);
     try {
       let context = "";
-      if (lock.has(law.hash)) {
+      if (lock.has(law.hash) && opts.again?.(law)) {
+        const entry = lock.get(law.hash)!;
+        context = `${AGAIN}\n\nCurrent enforcers:\n${entry.enforcers.map((e) => `- ${e.kind}: ${e.path}`).join("\n")}`;
+        log(`planning again: ${law.text}`);
+        say(`planned again: ${law.text}`);
+      } else if (lock.has(law.hash)) {
         const r = await reproveLaw(w, law, lock);
         logReproof(r, say);
         if (r.outcome !== "drift" && r.outcome !== "newly failing") return;

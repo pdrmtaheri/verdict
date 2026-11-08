@@ -172,3 +172,24 @@ test("the planner is told when TLC is available and when a proof beats a test", 
   const { SYSTEM } = await import("../src/plan.ts");
   expect(SYSTEM).toContain("a test only covers the schedules you wrote down");
 });
+
+test("plan --again re-plans an in-sync law on request", async () => {
+  const { root, lock } = planned(); // in sync: plan alone wouldn't touch it
+  const model = scriptedAgent([write, submit({ breaks: [goodBreak] })]);
+  agents.agent = model;
+  const log: string[] = [];
+  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l), { again: () => true })).toBe(true);
+  expect(log.join("\n")).toContain("planned again: Amounts are stored in cents.");
+  expect(model.prompts[0]).toContain("asked for this law to be planned again");
+  expect(model.prompts[0]).toContain(".verdict/cents.sh");
+});
+
+test("verdict plan --again refuses a selector that matches no law", () => {
+  const root = repo({ "VERDICT.md": `- ${LAW}\n` });
+  const cli = (...args: string[]) => Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args], { cwd: root, env: { ...process.env } });
+  const none = cli("plan", "--again", "no such law");
+  expect(none.exitCode).toBe(2);
+  expect(none.stderr.toString()).toContain("matches no law");
+  expect(cli("plan", "--again").stderr.toString()).toContain("--again needs a law");
+  expect(cli("check", "--again", "cents").stderr.toString()).toContain("only works with `verdict plan`");
+});
