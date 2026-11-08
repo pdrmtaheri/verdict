@@ -1,12 +1,18 @@
 #!/usr/bin/env bun
 import { check, exitCode, format, summarize } from "./check.ts";
-import { findSets, shown } from "./sets.ts";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { init } from "./init.ts";
+import { findSets, isDir, repoRoot, shown } from "./sets.ts";
 import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
 import { Claims, plan } from "./plan.ts";
 
 const USAGE = `usage: verdict <command> [path...]
 
+  init    draft VERDICT.md from the rules the project already wrote down
+          (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, .cursor/rules…), for you to
+          edit; in the given directory, or the repo root
   plan    sync the lock: plan new or reworded laws, re-prove planned ones on
           today's code (each enforcer must still fail on its break), and
           re-plan the ones that drifted
@@ -41,6 +47,13 @@ async function main(argv: string[]): Promise<number> {
     else paths.push(a);
   }
   if (again.length > 0 && command !== "plan") return usageError("--again only works with `verdict plan`");
+  if (command === "init") {
+    if (paths.length > 1) return usageError("init takes at most one directory");
+    const repo = await repoRoot(process.cwd());
+    const dir = paths[0] ? realpathSync(resolve(process.cwd(), paths[0])) : repo;
+    if (!isDir(dir)) return usageError(`${paths[0]} is not a directory`);
+    return init({ dir, repo }, (line) => console.log(line));
+  }
   if (command !== "plan" && command !== "check") {
     console.log(USAGE);
     return command === undefined || command === "help" || command === "--help" ? 0 : 2;

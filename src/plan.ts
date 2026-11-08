@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { ruleFiles } from "./init.ts";
 import { z } from "zod";
 import { defineTool, runAgent } from "./agent.ts";
 import { Break, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
@@ -252,10 +253,14 @@ export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: st
       : `The law is declared in ${label(w)}/VERDICT.md and applies to that directory's subtree only. ` +
         `Paths are relative to ${label(w)}/; ../ reaches the rest of the repo for context. ` +
         `Write enforcers in ${label(w)}/${OUT_DIR}/ and scope them to that subtree.`;
+  const rules = [...new Set([...ruleFiles(w.repo).map((f) => relative(w.dir, join(w.repo, f))), ...ruleFiles(w.dir)])];
+  const guides = rules.length
+    ? `\n\nThe project's own rules for people and agents, worth reading for context (they are not laws): ${rules.join(", ")}`
+    : "";
   let notes: string[] = [];
   const submission = await runAgent({
     system: SYSTEM,
-    prompt: `Law: ${law.text}\n\n${where}\n\nInstalled tools: ${installed.join(", ") || "none"}${context ? `\n\n${context}` : ""}`,
+    prompt: `Law: ${law.text}\n\n${where}\n\nInstalled tools: ${installed.join(", ") || "none"}${guides}${context ? `\n\n${context}` : ""}`,
     tools: { ...readTools(w.dir, w.repo), ...writeTools(w.dir, join(w.dir, OUT_DIR), w.repo, claim), ...planTools(w, law) },
     cwd: w.dir,
     submit: {
