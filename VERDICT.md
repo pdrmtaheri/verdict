@@ -21,3 +21,5 @@
   caught, finishes without starting a coding agent.
 - Re-wrapping or re-indenting a law in VERDICT.md never makes `verdict check`
   report it as not planned; changing any of its words does.
+- verdict never runs a string as JavaScript: no eval() and no Function
+  constructor anywhere in src/.
