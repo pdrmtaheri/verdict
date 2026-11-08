@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/plan-in-sync-no-agent.test.ts",
+    "description": "plan() re-plans every planned law that doesn't fail today, including laws that are in sync, so it starts the agent",
+    "edits": [
+      {
+        "path": "src/plan.ts",
+        "find": "if (r.outcome !== \"drift\") return;",
+        "replace": "if (r.outcome === \"fails today\") return;"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/plan-in-sync-no-agent.test.ts",
+    "description": "reproveLaw reports drift when an enforcer catches its break, so plan starts the agent on in-sync laws",
+    "edits": [
+      {
+        "path": "src/reprove.ts",
+        "find": "if (proof.kind === \"stale\" || proof.kind === \"missed\") drift = true;",
+        "replace": "if (proof.kind === \"stale\" || proof.kind === \"missed\" || proof.kind === \"caught\") drift = true;"
+      }
+    ]
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "enforcer": ".verdict/check-read-only.test.ts",
+    "description": "After running the checks, cli.ts check rewrites every VERDICT.lock with writeLock (normalising it), so the lock's contents change.",
+    "edits": [
+      {
+        "path": "src/cli.ts",
+        "find": "  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));",
+        "replace": "  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));\n  const { writeLock } = await import(\"./lock.ts\");\n  for (const set of sets) writeLock(set.lockFile, set.lock, set.laws);"
+      }
+    ]
+  }
+]
