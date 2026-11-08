@@ -26,6 +26,8 @@ f25eb789:
     accepted, and runAgent returns the first submission it accepted."
   enforcers:
     - test: .verdict/submit-first-wins.test.ts
+    - test: .verdict/submit-schedules.test.ts
+    - test: .verdict/submit-agent-throws.test.ts
 21becdf0:
   law: However `verdict plan` is interrupted, and in whatever order laws are
     added, reworded or removed, VERDICT.lock only holds entries for laws

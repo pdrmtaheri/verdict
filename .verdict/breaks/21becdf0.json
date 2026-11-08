@@ -1,7 +1,7 @@
 [
   {
     "enforcer": ".verdict/plan-interrupt-lock.test.ts",
-    "description": "plan() no longer rewrites the lock from the current laws when it starts, so entries for removed or reworded laws stay in VERDICT.lock until some other law is planned",
+    "description": "plan() no longer rewrites the lock from the current laws when it starts, so entries for removed or reworded laws stay in VERDICT.lock after an interrupt",
     "edits": [
       {
         "path": "src/plan.ts",

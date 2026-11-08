@@ -1,10 +1,10 @@
-// scope: startEgress() in src/egress.ts, driven over its TCP port and (when unix sockets can be opened) its unix socket with raw bytes. Allowlist is host 127.0.0.1 + one port; counting servers observe whether the proxy ever opens an upstream connection. Covers ~40 hostile CONNECT/GET/other requests (wrong port, other host names for the same machine such as localhost/LOCALHOST/trailing dot/decimal/hex/short/IPv6 forms, odd casing, padding with spaces/tabs/CRLF/NUL, userinfo, absolute URIs, pipelined requests, smuggled second CONNECT inside a tunnel), each sent whole, one byte at a time, and split at every line. Real outbound hosts (DNS) are not used; the codex wiring in src/agents/codex.ts and the netns forwarder are not covered.
+// scope: startEgress() in src/agents/egress.ts, driven over its TCP port and (when unix sockets can be opened) its unix socket with raw bytes. Allowlist is host 127.0.0.1 + one port; counting servers observe whether the proxy ever opens an upstream connection. Covers ~40 hostile CONNECT/GET/other requests (wrong port, other host names for the same machine such as localhost/LOCALHOST/trailing dot/decimal/hex/short/IPv6 forms, odd casing, padding with spaces/tabs/CRLF/NUL, userinfo, absolute URIs, pipelined requests, smuggled second CONNECT inside a tunnel), each sent whole, one byte at a time, and split at every line. Real outbound hosts (DNS) are not used; the codex wiring in src/agents/codex.ts and the netns forwarder are not covered.
 import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startEgress } from "../src/egress.ts";
+import { startEgress } from "../src/agents/egress.ts";
 
 const canUnix = (() => {
   const r = Bun.spawnSync([process.execPath, "-e", `require("net").createServer().listen(require("path").join(${JSON.stringify(tmpdir())}, "verdict-probe-" + process.pid + ".sock"), function () { this.close(); process.exit(0) }).on("error", () => process.exit(1))`]);

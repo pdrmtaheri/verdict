@@ -20,5 +20,27 @@
         "replace": "      const handled = Promise.resolve().then(async () => {"
       }
     ]
+  },
+  {
+    "enforcer": ".verdict/submit-schedules.test.ts",
+    "description": "Stop serialising submits through `queue`, so concurrent submits are validated at the same time.",
+    "edits": [
+      {
+        "path": "src/agent.ts",
+        "find": "      const handled = queue.then(async () => {",
+        "replace": "      const handled = Promise.resolve().then(async () => {"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/submit-schedules.test.ts",
+    "description": "Remove the `if (submitted)` guard in runAgent's submit so later submits are validated again.",
+    "edits": [
+      {
+        "path": "src/agent.ts",
+        "find": "        if (submitted) return \"already accepted. You are done; stop here.\";\n",
+        "replace": ""
+      }
+    ]
   }
 ]

@@ -17,6 +17,11 @@ const CLT = "/Library/Developer/CommandLineTools/usr/bin";
 const PATH = [existsSync(CLT) ? CLT : "", process.env.PATH, "/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"].filter(Boolean).join(":");
 const ENV = { ...process.env, PATH, VERDICT_SANDBOX: "off" };
 
+// The bogus agent name given to the CLI. Starting any agent resolves it and fails with an error that names it,
+// whatever the error's exact wording is.
+const BOGUS = "no-such-agent";
+const triedAgent = (out: string) => out.includes(`VERDICT_AGENT=${BOGUS}`);
+
 afterEach(() => {
   delete agents.agent;
 });
@@ -62,7 +67,7 @@ function fixture(specs: Spec[]): string {
 async function cli(root: string): Promise<{ code: number; out: string }> {
   const proc = Bun.spawn([process.execPath, join(REPO, "src/cli.ts"), "plan"], {
     cwd: root,
-    env: { ...ENV, VERDICT_AGENT: "no-such-agent", VERDICT_JOBS: "4" },
+    env: { ...ENV, VERDICT_AGENT: BOGUS, VERDICT_JOBS: "4" },
     stdout: "pipe",
     stderr: "pipe",
     timeout: 240_000,
@@ -88,7 +93,7 @@ test("CLI: plan with every law in sync starts no agent and exits 0", async () =>
     const root = fixture(specs);
     try {
       const { code, out } = await cli(root);
-      expect(out).not.toContain("is not one of"); // that error means plan tried to start an agent
+      expect(triedAgent(out)).toBe(false); // that error means plan tried to start an agent
       expect(out).not.toContain("error:");
       expect(out).not.toContain("planning:");
       expect(out.match(/in sync:/g)?.length).toBe(specs.length);
@@ -121,7 +126,7 @@ test("controls: a drifted law and an unplanned law do start the agent", async ()
     const root = fixture([{ dir: "", text: "Amounts are stored in cents.", word: "cents", state }]);
     try {
       const { code, out } = await cli(root);
-      expect(out).toContain("is not one of");
+      expect(triedAgent(out)).toBe(true);
       expect(code).toBe(1);
     } finally {
       rmSync(root, { recursive: true, force: true });
