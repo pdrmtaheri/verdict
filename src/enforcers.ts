@@ -22,12 +22,12 @@ export interface Context {
 }
 
 // Runs a program for an enforcer, in the sandbox when the context asks for one.
-async function run(ctx: Context, argv: string[], extraReadable: string[] = []): Promise<ExecResult> {
-  if (!ctx.sandbox) return exec(argv, { cwd: ctx.root });
+async function run(ctx: Context, argv: string[], extraReadable: string[] = [], env: Record<string, string> = {}): Promise<ExecResult> {
+  if (!ctx.sandbox) return exec(argv, { cwd: ctx.root, env });
   // Write access covers the whole (scratch) repo: a nested law's tests may
   // build or cache at the repo root, as in a monorepo.
   const repo = ctx.repo ?? ctx.root;
-  const box = sandboxed(argv, { readable: [repo, ...ctx.sandbox.readable, ...extraReadable], writable: [repo], network: false }, ctx.root);
+  const box = sandboxed(argv, { readable: [repo, ...ctx.sandbox.readable, ...extraReadable], writable: [repo], network: false, env }, ctx.root);
   const r = await exec(box.argv, { cwd: ctx.root, env: box.env, cleanEnv: true });
   const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
   if (broken) {
@@ -118,7 +118,11 @@ const tla: Runner = async (ctx) => {
   if (!tlc) return inconclusive("TLC is not installed (put tlc on PATH or set VERDICT_TLA2TOOLS to tla2tools.jar)");
   // TLC's state files go inside root when sandboxed, the only place it may write.
   const meta = mkdtempSync(ctx.sandbox ? join(root, ".tlc-") : join(tmpdir(), "verdict-tlc-"));
-  const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], jar ? [jar] : []);
+  // TLC unpacks its standard modules (Naturals, Sequences…) into Java's temp
+  // directory, which comes from java.io.tmpdir, not TMPDIR. Point it at a
+  // directory it may write, or every spec fails with "Cannot find … Naturals".
+  const env = { JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS ?? ""} -Djava.io.tmpdir=${meta}`.trim() };
+  const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], jar ? [jar] : [], env);
   if (r.code === 0) return pass();
   if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
   return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);

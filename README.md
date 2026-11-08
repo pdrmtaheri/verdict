@@ -137,7 +137,7 @@ Environment variables:
 | `TYPESAFE_AI_API_KEY` | Key for decision-model (jev) enforcers |
 | `VERDICT_DECISION_MODEL` | Decision model to use (default `jev-1.14.0`) |
 | `VERDICT_JOBS` | How many laws to plan or check at once (default 4; each law being planned is one agent session) |
-| `VERDICT_TLA2TOOLS` | Path to `tla2tools.jar`, if TLC isn't on `PATH` as `tlc`. With TLC available, laws about concurrency, retries or crashes get a TLA+ model |
+| `VERDICT_TLA2TOOLS` | Path to `tla2tools.jar`, if TLC isn't on `PATH` as `tlc`. The TLA+ Toolbox (`brew install tla-plus-toolbox`) ships one at `/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar`. With TLC available, laws about concurrency, retries or crashes get a TLA+ model |
 | `VERDICT_SANDBOX` | Set to `off` only when verdict already runs inside a sandbox (macOS sandboxes don't nest) |
 
 ## Files

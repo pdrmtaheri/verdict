@@ -166,3 +166,23 @@ test("tool input is validated before a tool runs, whichever agent calls it", asy
   const boom = defineTool({ description: "", schema: z.object({}), execute: async () => { throw new Error("nope"); } });
   expect(await callTool(boom, {})).toEqual({ text: "nope", isError: true });
 });
+
+// Runs only where TLC is available (tlc on PATH or VERDICT_TLA2TOOLS / the TLA+ Toolbox's jar).
+const toolboxJar = "/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar";
+const tlcAvailable = !!Bun.which("tlc") || !!process.env.VERDICT_TLA2TOOLS || (await Bun.file(toolboxJar).exists());
+test.skipIf(!tlcAvailable)("a TLA+ enforcer passes when its invariant holds and fails when it's violated", async () => {
+  const saved = process.env.VERDICT_TLA2TOOLS;
+  if (!Bun.which("tlc") && !saved) process.env.VERDICT_TLA2TOOLS = toolboxJar;
+  const spec = (inv: string) => `---- MODULE Counter ----\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
+  try {
+    const ok = repo({ ".verdict/Counter.tla": spec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const okR = await checkLaw(at(ok), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] });
+    expect(okR.details[0]!.result.message).not.toContain("Cannot find source file");
+    expect(okR.status).toBe("pass");
+    const bad = repo({ ".verdict/Counter.tla": spec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    expect((await checkLaw(at(bad), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] })).status).toBe("fail");
+  } finally {
+    if (saved === undefined) delete process.env.VERDICT_TLA2TOOLS;
+    else process.env.VERDICT_TLA2TOOLS = saved;
+  }
+}, 60_000);
