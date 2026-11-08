@@ -149,3 +149,13 @@ test("lawViews joins laws, the lock and the latest report", async () => {
   expect(after[0]!.enforcers[0]).toMatchObject({ status: "fail", message: "boom" });
   expect(after[1]!.status).toBe("unplanned");
 });
+
+test("an outer check or plan leaves a playground's laws alone unless pointed at it", async () => {
+  const { findSets } = await import("../src/sets.ts");
+  const root = repo({ "VERDICT.md": "- The repo is fine.\n", "examples/p/PLAYGROUND.json": manifest, "examples/p/VERDICT.md": "- The playground is fine.\n", "examples/q/VERDICT.md": "- A plain nested law.\n" });
+  const rel = (sets: { lawsFile: string }[]) => sets.map((s) => s.lawsFile.replace(/^.*verdict-test-[^/]+\//, "")).sort();
+  expect(rel((await findSets(root, [])).sets)).toEqual(["VERDICT.md", "examples/q/VERDICT.md"]);
+  expect(rel((await findSets(root, ["examples"])).sets)).toEqual(["examples/q/VERDICT.md"]);
+  expect(rel((await findSets(root, ["examples/p"])).sets)).toEqual(["examples/p/VERDICT.md"]);
+  expect(rel((await findSets(root, ["examples/p/src"])).sets)).toEqual([]); // a path inside it, but no laws declared there
+});

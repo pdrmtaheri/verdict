@@ -200,6 +200,10 @@ write them that way. Describe versions in `PLAYGROUND.json`:
   "versions": [{ "id": "skips-yellow", "label": "Skips yellow", "note": "Green drops straight to red." }] }
 ```
 
+A playground is a world of its own: an outer `verdict check` or `verdict plan`
+skips any folder that has a `PLAYGROUND.json`, unless you point at it
+(`verdict check examples/traffic-light`).
+
 ### Making a playground
 
 Use the `create-playground` skill in
