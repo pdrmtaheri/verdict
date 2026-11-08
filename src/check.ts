@@ -10,6 +10,7 @@ import type { Break } from "./breaks.ts";
 
 export interface LawReport {
   law: string;
+  hash?: string;
   status: Status | "unplanned";
   // warnings: what changed since the enforcer was proven, and what verdict
   // did about it. They don't change the status on their own.
@@ -90,8 +91,8 @@ export async function check(w: Where, laws: Law[], lock: Lock, limit: Limit = ma
     laws.map((law) => {
       const entry = lock.get(law.hash);
       // An entry with no enforcers checks nothing, so the law isn't planned.
-      if (!entry || entry.enforcers.length === 0) return { law: law.text, status: "unplanned" as const, details: [] };
-      return limit(() => checkLaw(w, entry, { hash: law.hash }));
+      if (!entry || entry.enforcers.length === 0) return { law: law.text, hash: law.hash, status: "unplanned" as const, details: [] };
+      return limit(async () => ({ ...(await checkLaw(w, entry, { hash: law.hash })), hash: law.hash }));
     }),
   );
 }

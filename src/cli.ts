@@ -3,6 +3,7 @@ import { check, exitCode, format, summarize } from "./check.ts";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { init } from "./init.ts";
+import { sarif } from "./sarif.ts";
 import { findSets, isDir, repoRoot, shown } from "./sets.ts";
 import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
@@ -19,6 +20,7 @@ const USAGE = `usage: verdict <command> [path...]
           --again <law>  plan this law afresh even if it's in sync; <law> is
                          a hash prefix or part of its text (repeatable)
   check   run every law's enforcers; exit 1 if any law fails or isn't planned
+          --format sarif  print the report as SARIF (GitHub code scanning)
 
 Laws live in VERDICT.md files: any directory can have one, and its laws apply
 to that directory's subtree. Each keeps its plan in VERDICT.lock and its
@@ -37,9 +39,14 @@ async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const paths: string[] = [];
   const again: string[] = [];
+  let fmt = "text";
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
-    if (a === "--again") {
+    if (a === "--format" || a.startsWith("--format=")) {
+      const value = a === "--format" ? rest[++i] : a.slice("--format=".length);
+      if (value !== "text" && value !== "sarif") return usageError("--format is text or sarif");
+      fmt = value;
+    } else if (a === "--again") {
       const value = rest[++i];
       if (!value) return usageError("--again needs a law: a hash prefix or part of the law's text");
       again.push(value);
@@ -47,6 +54,7 @@ async function main(argv: string[]): Promise<number> {
     else paths.push(a);
   }
   if (again.length > 0 && command !== "plan") return usageError("--again only works with `verdict plan`");
+  if (fmt !== "text" && command !== "check") return usageError("--format only works with `verdict check`");
   if (command === "init") {
     if (paths.length > 1) return usageError("init takes at most one directory");
     const repo = await repoRoot(process.cwd());
@@ -90,6 +98,10 @@ async function main(argv: string[]): Promise<number> {
     return results.every(Boolean) ? 0 : 1;
   }
   const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));
+  if (fmt === "sarif") {
+    console.log(JSON.stringify(sarif(repo, sets.map((set, i) => ({ where: set, lawsFile: set.lawsFile, reports: reports[i]! }))), null, 2));
+    return exitCode(reports.flat());
+  }
   sets.forEach((set, i) => {
     if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
     console.log(format(reports[i]!, !many));
