@@ -1,1 +1,13 @@
-[]
+[
+  {
+    "enforcer": ".verdict/check-exit-code.test.ts",
+    "description": "exitCode no longer counts a law that is not planned as a failure, so check exits 0 with a law not planned",
+    "edits": [
+      {
+        "path": "src/check.ts",
+        "find": "r.status === \"fail\" || r.status === \"unplanned\") ? 1 : 0",
+        "replace": "r.status === \"fail\") ? 1 : 0"
+      }
+    ]
+  }
+]

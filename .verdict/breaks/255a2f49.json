@@ -1,0 +1,35 @@
+[
+  {
+    "enforcer": ".verdict/src-provider-boundary.test.ts",
+    "description": "checkLaw() in src/check.ts spawns the claude CLI directly instead of going through runAgent()",
+    "edits": [
+      {
+        "path": "src/check.ts",
+        "find": "export async function checkLaw(w: Where, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {",
+        "replace": "export async function checkLaw(w: Where, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {\n  await Bun.spawn([\"claude\", \"-p\", entry.law]).exited;"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/src-provider-boundary.test.ts",
+    "description": "src/check.ts imports the codex adapter from src/agents/ directly, bypassing runAg叫()",
+    "edits": [
+      {
+        "path": "src/check.ts",
+        "find": "import type { Law } from \"./laws.ts\";",
+        "replace": "import type { Law } from \"./laws.ts\";\nimport { codex } from \"./agents/codex.ts\";"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/src-provider-boundary.test.ts",
+    "description": "the decision enforcer in src/enforcers.ts passes a hard-coded provider model string to experimental_decide instead of decisionModel()",
+    "edits": [
+      {
+        "path": "src/enforcers.ts",
+        "find": "model: decisionModel(),",
+        "replace": "model: \"anthropic/claude-sonnet\" as never,"
+      }
+    ]
+  }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "enforcer": ".verdict/agent-read-boundary.test.ts",
+    "description": "read_file resolves the path with resolve(root, path) instead of inside(root, path, repo), so ../ and absolute paths read outside the repo",
+    "edits": [
+      {
+        "path": "src/tools.ts",
+        "find": "const text = readFileSync(inside(root, path, repo), \"utf8\");",
+        "replace": "const text = readFileSync(resolve(root, path), \"utf8\");"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/planner-scratch-boundary.test.ts",
+    "description": "write_file confines paths to the repo instead of .verdict/, so the planner can overwrite src files",
+    "edits": [
+      {
+        "path": "src/tools.ts",
+        "find": "const abs = inside(root, path, outDir);",
+        "replace": "const abs = inside(root, path, repo);"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/planner-sandbox.judge.md",
+    "description": "run's sandbox Box makes the real repo writable alongside the scratch copy",
+    "edits": [
+      {
+        "path": "src/tools.ts",
+        "find": "const box = sandboxed(argv, { readable: [copy, repo], writable: [copy], network: false }, dir);",
+        "replace": "const box = sandboxed(argv, { readable: [copy, repo], writable: [copy, repo], network: false }, dir);"
+      }
+    ]
+  }
+]
