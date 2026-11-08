@@ -17,7 +17,7 @@ export const OUT_DIR = ".verdict";
 
 const PROBE = ["semgrep", "eslint", "ruff", "golangci-lint", "clippy-driver", "mypy", "pyright", "tlc", "java", "go", "python3", "pytest", "cargo", "bun", "node"];
 
-const SYSTEM = `You plan how to enforce one law about a software repository. A law is
+export const SYSTEM = `You plan how to enforce one law about a software repository. A law is
 an assertion in prose. You pick the enforcer(s) that check it, write them into
 ${OUT_DIR}/, prove each one can fail, and call submit.
 
@@ -33,6 +33,12 @@ Rules
 - Use the repo's own tooling when it is robust. Look at its config and
   dependencies first. Prefer installed tools; if the best tool is missing,
   still pick it and say so in suggestions.
+- When a law is about interleavings, concurrency, retries, crashes or "in any
+  order", a test only covers the schedules you wrote down. If TLC is installed,
+  model the design in TLA+ and check it, paired with a test generated from the
+  spec (see tla below): that covers every schedule up to the bound. If TLC
+  isn't installed, write the test, and add a suggestion that installing TLC
+  would let this law be model-checked.
 - Cover every way the law can be broken, not the convenient one: every entry
   point a user has (UI, CLI, API), every code path that writes the guarded state.
 - Keep each enforcer cheap to rerun: seconds, a few minutes at most. Choose
@@ -198,6 +204,8 @@ function planTools(w: Where, law: Law) {
 
 export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: string) => string | null): Promise<PlanOutcome> {
   const installed = PROBE.filter((t) => which(w.dir, t));
+  const jar = process.env.VERDICT_TLA2TOOLS;
+  if (jar && existsSync(jar) && !installed.includes("tlc")) installed.push("tlc (tla2tools.jar via VERDICT_TLA2TOOLS)");
   const where =
     w.dir === w.repo
       ? "The law is declared in VERDICT.md at the repo root and applies to the whole repo."

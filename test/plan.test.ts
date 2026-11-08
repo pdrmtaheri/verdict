@@ -157,3 +157,18 @@ test("plan re-plans a law that passed when planned and fails now", async () => {
   expect(model.prompts[0]).toContain("passed when it was planned");
   expect(model.prompts[0]).toContain("something incidental");
 });
+
+test("the planner is told when TLC is available and when a proof beats a test", async () => {
+  const root = money();
+  const jar = join(root, "tla2tools.jar");
+  writeFileSync(jar, "");
+  process.env.VERDICT_TLA2TOOLS = jar;
+  try {
+    const { model } = await runPlan(root, []);
+    expect(model.prompts[0]).toContain("tlc (tla2tools.jar via VERDICT_TLA2TOOLS)");
+  } finally {
+    delete process.env.VERDICT_TLA2TOOLS;
+  }
+  const { SYSTEM } = await import("../src/plan.ts");
+  expect(SYSTEM).toContain("a test only covers the schedules you wrote down");
+});
