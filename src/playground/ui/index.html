@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>verdict playground</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><b>verdict</b><span class="slash">/</span><span>playground</span></div>
+  <nav id="switcher" class="switcher" aria-label="Playgrounds" hidden></nav>
+  <div class="bar-right">
+    <div class="conn"><i id="conn-dot" class="dot"></i><span id="conn-text">No agent connected yet</span></div>
+    <button id="plan" class="btn">Plan</button>
+    <button id="check" class="btn marker">Check</button>
+  </div>
+</header>
+<div class="layout">
+  <section class="laws" aria-label="Laws">
+    <h1 id="title">verdict playground</h1>
+    <p id="idea" class="idea"></p>
+    <div id="versions" class="versions" hidden>
+      <div class="vrow">
+        <div id="vpills" class="vpills" role="tablist" aria-label="Versions of the code"></div>
+        <button id="check-all" class="link">Check all versions</button>
+      </div>
+      <p id="vnote" class="vnote"></p>
+    </div>
+    <div class="summary">
+      <div id="counts" class="counts"></div>
+      <div class="links"><button id="toggle-brief" class="link">Brief</button><button id="toggle-edit" class="link">Edit laws</button></div>
+    </div>
+    <div id="brief-text" class="brief" hidden></div>
+    <div id="edit" class="edit" hidden>
+      <textarea id="laws-text" spellcheck="false" rows="9" aria-label="VERDICT.md"></textarea>
+      <div class="row"><button id="save-laws" class="btn small">Save laws</button><button id="cancel-edit" class="link">Cancel</button><span id="laws-msg" class="note"></span></div>
+    </div>
+    <div id="laws-list" class="lawlist"><div class="band" aria-hidden="true"></div><div id="law-rows"></div></div>
+  </section>
+  <aside class="side">
+    <section id="preview" aria-label="Preview">
+      <div class="label-row"><div><span class="label">Preview</span> <span class="mono dim">public/index.html</span></div><button id="reload" class="link">Reload</button></div>
+      <iframe id="preview-frame" sandbox="allow-scripts" title="The program the agent builds" referrerpolicy="no-referrer"></iframe>
+    </section>
+    <div id="drawer" class="drawer">
+      <div id="drawer-handle" class="handle" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the panel" tabindex="0"></div>
+      <div class="dbar" role="tablist" aria-label="Panels">
+        <button class="dtab" id="dtab-activity" data-panel="activity" role="tab" aria-expanded="false">Activity</button>
+        <button class="dtab" id="dtab-files" data-panel="files" role="tab" aria-expanded="false">Files</button>
+        <button class="dtab" id="dtab-connect" data-panel="connect" role="tab" aria-expanded="false"><i id="dtab-dot" class="dot"></i>Connect your agent</button>
+        <button id="drawer-close" class="link close" aria-label="Close panel">Close</button>
+      </div>
+      <div id="dpanel" class="dpanel" inert>
+        <div id="pane-activity" data-pane="activity" hidden><ul id="activity-list" class="activity"></ul></div>
+        <div id="pane-files" data-pane="files" hidden>
+          <div class="files"><ul id="file-list"></ul><pre id="file-view" class="dim">Select a file.</pre></div>
+        </div>
+        <div id="pane-connect" data-pane="connect" hidden>
+          <div class="tabs-row">
+            <div class="tabs" role="tablist">
+              <button class="tab on" data-tab="claude" role="tab">Claude Code</button>
+              <button class="tab" data-tab="other" role="tab">Other agents</button>
+            </div>
+          </div>
+          <div id="tab-claude">
+            <div class="step"><span class="n">1</span><div>
+              <h3>Add this playground to Claude Code</h3>
+              <p>Run it once in a terminal. The link carries a secret token that only works on this machine.</p>
+              <div class="cmd"><pre id="cmd-claude"></pre><button class="btn marker small" data-copy="cmd-claude">Copy</button></div>
+            </div></div>
+            <div class="step"><span class="n">2</span><div>
+              <h3>Start Claude Code and give it the brief</h3>
+              <p>Open a new session in any folder, then say:</p>
+              <div class="prompt"><span>Read the brief and build this playground.</span><button class="link" data-copy-text="Read the brief and build this playground.">Copy</button></div>
+            </div></div>
+          </div>
+          <div id="tab-other" hidden>
+            <div class="step"><span class="n">1</span><div>
+              <h3>Point any MCP agent at this address</h3>
+              <p>Streamable HTTP. Send the token as a bearer header, or keep it in the URL.</p>
+              <div class="cmd"><pre id="cmd-url"></pre><button class="btn marker small" data-copy="cmd-url">Copy</button></div>
+              <div class="cmd gap"><pre id="cmd-header"></pre><button class="btn marker small" data-copy="cmd-header">Copy</button></div>
+            </div></div>
+          </div>
+          <div class="waiting"><i id="wait-dot" class="dot amber"></i><span id="wait-text">Waiting for the agent to call its first tool. This page updates on its own.</span></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

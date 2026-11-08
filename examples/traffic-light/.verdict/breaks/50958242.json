@@ -1,0 +1,13 @@
+[
+  {
+    "enforcer": ".verdict/green-each-cycle.test.ts",
+    "description": "The east-west green phase shows red instead of green, so east-west never gets a green in the cycle",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "{ ms: 10000, ns: 'red', ew: 'green' }",
+        "replace": "{ ms: 10000, ns: 'red', ew: 'red' }"
+      }
+    ]
+  }
+]

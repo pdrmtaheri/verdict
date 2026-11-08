@@ -1,0 +1,7 @@
+{
+  "title": "<Short name>",
+  "idea": "<One line: what is being built>",
+  "brief": "Build <thing> in src/<file>. Write tests in test/ (<runner>). Work law by law: call get_brief, write tests with write_file, run them with run_tests, then call plan and check until every law passes. A law that fails today is a finding about your code, not something to weaken.",
+  "panels": ["brief", "laws", "checks", "files", "activity"],
+  "writable": ["src", "test", ".verdict"]
+}

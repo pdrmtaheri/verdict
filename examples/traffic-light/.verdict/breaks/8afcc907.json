@@ -1,0 +1,13 @@
+[
+  {
+    "enforcer": ".verdict/light-order.test.ts",
+    "description": "The NS yellow phase and the all-red gap swap places, so NS goes green -> red -> yellow -> red (skips yellow, then red -> yellow)",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "{ ms: 3000, ns: 'yellow', ew: 'red' },\n    { ms: 2000, ns: 'red', ew: 'red' },",
+        "replace": "{ ms: 3000, ns: 'red', ew: 'red' },\n    { ms: 2000, ns: 'yellow', ew: 'red' },"
+      }
+    ]
+  }
+]

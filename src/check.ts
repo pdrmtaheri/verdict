@@ -11,10 +11,10 @@ export interface LawReport {
 
 // Runs a law's enforcers. An LLM judge next to a decision model is its
 // fallback: it runs only when the decision model is inconclusive.
-export async function checkLaw(root: string, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {
+export async function checkLaw(root: string, entry: LockEntry, sandbox?: { readable: string[]; writable?: string[] }, target?: string, exclude?: string[]): Promise<LawReport> {
   const details: LawReport["details"] = [];
   const run = async (kind: string, path: string) => {
-    const result = await runEnforcer(kind, { root, law: entry.law, path, sandbox });
+    const result = await runEnforcer(kind, { root, law: entry.law, path, sandbox, target, exclude });
     details.push({ kind, path, result, scope: scopeOf(root, path) });
     return result;
   };

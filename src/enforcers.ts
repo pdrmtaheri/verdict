@@ -1,7 +1,7 @@
 // How each enforcer kind runs. Every kind observes the repo from outside.
-import { existsSync, readFileSync, statSync, mkdtempSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { experimental_decide } from "ai";
 import { z } from "zod";
 import { runAgent } from "./agent.ts";
@@ -13,19 +13,39 @@ import { staleReason } from "./specbind.ts";
 import { readTools } from "./tools.ts";
 
 export interface Context {
-  root: string;
+  root: string; // the repo the enforcer lives in (.verdict/, the lock)
   law: string;
   path: string; // enforcer file, relative to root
+  // Where the code under check is: the repo root when unset. Enforcers are told
+  // through VERDICT_TARGET (and semgrep is pointed at it), so the same enforcer
+  // can judge another folder of code, such as a version, without copying it.
+  target?: string;
+  // Paths inside the target that are not part of the code under check, such as
+  // the other versions' folders. semgrep skips them; scripts get them in
+  // VERDICT_EXCLUDE, separated by ":".
+  exclude?: string[];
   // Set while planning: root is a scratch copy, and every program runs in the
-  // OS sandbox, writing only to root. `readable` is what else it may read.
-  sandbox?: { readable: string[] };
+  // OS sandbox, writing only to `writable` (default: root). `readable` is what
+  // else it may read. A check that must not change anything passes writable: [].
+  sandbox?: { readable: string[]; writable?: string[] };
 }
 
+const targetOf = (ctx: Context) => ctx.target ?? ctx.root;
+
 // Runs a program for an enforcer, in the sandbox when the context asks for one.
-async function run(ctx: Context, argv: string[], extraReadable: string[] = []): Promise<ExecResult> {
-  if (!ctx.sandbox) return exec(argv, { cwd: ctx.root });
-  const box = sandboxed(argv, { readable: [ctx.root, ...ctx.sandbox.readable, ...extraReadable], writable: [ctx.root], network: false }, ctx.root);
-  const r = await exec(box.argv, { cwd: ctx.root, env: box.env, cleanEnv: true });
+// Every program gets VERDICT_TARGET: the folder of code the enforcer should look at.
+async function run(ctx: Context, argv: string[], o: { cwd?: string; readable?: string[]; writable?: string[] } = {}): Promise<ExecResult> {
+  const target = targetOf(ctx);
+  const env: Record<string, string> = { VERDICT_TARGET: target };
+  if (ctx.exclude?.length) env.VERDICT_EXCLUDE = ctx.exclude.join(":");
+  const cwd = o.cwd ?? ctx.root;
+  if (!ctx.sandbox) return exec(argv, { cwd, env });
+  const box = sandboxed(
+    argv,
+    { readable: [ctx.root, target, ...ctx.sandbox.readable, ...(o.readable ?? [])], writable: [...(ctx.sandbox.writable ?? [ctx.root]), ...(o.writable ?? [])], network: false, env },
+    cwd,
+  );
+  const r = await exec(box.argv, { cwd, env: box.env, cleanEnv: true });
   const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
   if (broken) {
     throw new SandboxUnavailable(`couldn't start verdict's sandbox (${broken}). If verdict itself already runs in a sandbox, set VERDICT_SANDBOX=off`);
@@ -43,7 +63,12 @@ const semgrep: Runner = async (ctx) => {
   const { root, path } = ctx;
   const exe = which(root, "semgrep");
   if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
-  const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--disable-version-check", "--quiet"]);
+  const target = targetOf(ctx);
+  // Skipping a path means scanning its siblings: semgrep's --exclude hangs inside the sandbox.
+  const skip = new Set(ctx.exclude ?? []);
+  const targets = skip.size ? readdirSync(target).filter((n) => !skip.has(n)).map((n) => join(target, n)) : [target];
+  if (targets.length === 0) return pass("nothing to scan");
+  const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--disable-version-check", "--quiet", ...targets]);
   if (r.code === 0) return pass();
   if (r.code === 1) return fail(tail(r.output));
   return inconclusive(`semgrep exited ${r.code}\n${tail(r.output)}`);
@@ -92,21 +117,27 @@ export const SKIPPED = 77;
 
 const tla: Runner = async (ctx) => {
   const { root, path } = ctx;
-  const stale = staleReason(root, path); // cheap, and the reason a code change makes this enforcer fail
+  const target = targetOf(ctx);
+  const stale = staleReason(root, path, target); // cheap, and the reason a code change makes this enforcer fail
+  if (stale && target !== root) return inconclusive(`this spec describes the main code, and "${relative(root, target) || "."}" differs from it, so only the replay test says whether that code conforms`);
   if (stale) return fail(stale);
   const jar = process.env.VERDICT_TLA2TOOLS;
   const onPath = Bun.which("tlc");
   if (!onPath && !jar) return inconclusive("TLC is not installed (put tlc on PATH or set VERDICT_TLA2TOOLS to tla2tools.jar)");
-  // TLC's state files go inside root when sandboxed, the only place it may write.
-  const meta = mkdtempSync(ctx.sandbox ? join(root, ".tlc-") : join(tmpdir(), "verdict-tlc-"));
-  // TLC unpacks its standard modules (Naturals, Sequences...) into Java's temp
-  // directory, which the sandbox doesn't allow; point it at the writable one.
-  const tmpOpt = `-Djava.io.tmpdir=${meta}`;
-  const tlc = onPath ? ["env", `JAVA_TOOL_OPTIONS=${tmpOpt}`, "tlc"] : ["java", tmpOpt, "-cp", jar!, "tlc2.TLC"];
-  const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], jar ? [jar] : []);
-  if (r.code === 0) return pass();
-  if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
-  return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);
+  // TLC's state files go in a temp directory the sandbox is told it may write to.
+  const meta = mkdtempSync(join(tmpdir(), "verdict-tlc-"));
+  try {
+    // TLC unpacks its standard modules (Naturals, Sequences...) into Java's temp
+    // directory, which the sandbox doesn't allow; point it at the writable one.
+    const tmpOpt = `-Djava.io.tmpdir=${meta}`;
+    const tlc = onPath ? ["env", `JAVA_TOOL_OPTIONS=${tmpOpt}`, "tlc"] : ["java", tmpOpt, "-cp", jar!, "tlc2.TLC"];
+    const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], { readable: jar ? [jar] : [], writable: [meta] });
+    if (r.code === 0) return pass();
+    if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
+    return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);
+  } finally {
+    rmSync(meta, { recursive: true, force: true });
+  }
 };
 
 // ---------------------------------------------------------------- decision models (jev)
@@ -124,7 +155,7 @@ const DecisionFile = z.object({
 const decision: Runner = async (ctx) => {
   const { root, path } = ctx;
   const spec = DecisionFile.parse(JSON.parse(readFileSync(join(root, path), "utf8")));
-  const state = await run(ctx, ["sh", "-c", spec.state_from]);
+  const state = await run(ctx, ["sh", "-c", spec.state_from], { cwd: targetOf(ctx) });
   if (state.code !== 0) return inconclusive(`state_from exited ${state.code}\n${tail(state.output)}`);
   if (state.output === "") return pass("state_from produced nothing to judge");
   const result = await experimental_decide({
@@ -155,13 +186,15 @@ const Verdict = z.object({
   reason: z.string().describe("One or two sentences. For fail, name file:line."),
 });
 
-const llm: Runner = async ({ root, law, path }) => {
+const llm: Runner = async (ctx) => {
+  const { root, law, path } = ctx;
+  const target = targetOf(ctx); // the judge reads the code under check; the notes come from the enforcer
   const hints = readFileSync(join(root, path), "utf8");
   const verdict = await runAgent({
     system: JUDGE_SYSTEM,
     prompt: `Law: ${law}\n\nNotes from the plan:\n${hints}`,
-    tools: readTools(root),
-    cwd: root,
+    tools: readTools(target),
+    cwd: target,
     submit: { description: "Report your verdict on the law.", schema: Verdict },
   });
   if (!verdict) return inconclusive("the judge did not reach a verdict");

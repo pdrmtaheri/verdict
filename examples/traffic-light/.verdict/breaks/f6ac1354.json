@@ -1,0 +1,13 @@
+[
+  {
+    "enforcer": ".verdict/no-cross-go.test.ts",
+    "description": "NS yellow phase now shows EW green, so both roads go at once",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "{ ms: 3000, ns: 'yellow', ew: 'red' }",
+        "replace": "{ ms: 3000, ns: 'yellow', ew: 'green' }"
+      }
+    ]
+  }
+]

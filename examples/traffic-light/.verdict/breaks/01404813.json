@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/no-real-clock.yaml",
+    "description": "controller takes its time from Date.now() instead of opts.now",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "var now = opts.now;",
+        "replace": "var now = function () { return Date.now(); };"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/clock-injected.test.ts",
+    "description": "recover() restarts the cycle from the real clock (Date.now()) instead of now()",
+    "edits": [
+      {
+        "path": "public/controller.js",
+        "find": "mode = 'cycle'; faulting = false; hold = null; i = ALL_RED; start = now();",
+        "replace": "mode = 'cycle'; faulting = false; hold = null; i = ALL_RED; start = Date.now();"
+      }
+    ]
+  }
+]
