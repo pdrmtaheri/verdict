@@ -219,8 +219,8 @@ export async function runLint(ctx: LintContext, warn: (w: string) => void): Prom
   }
   const r = await linter.findings(ctx, exe, files);
   if ("status" in r) return r;
-  if (r.suppressed > 0) warn(`${r.suppressed} finding${r.suppressed === 1 ? "" : "s"} of ${ctx.rule} suppressed by disable comments in the scope`);
+  if (r.suppressed > 0) warn(`${r.suppressed} finding${r.suppressed === 1 ? "" : "s"} of ${ctx.rule} suppressed by disable comments in the scope: remove the comments and fix the code, or leave them if each exception is deliberate`);
   if (r.found.length === 0) return pass();
   const shown = r.found.slice(0, 20).map((f) => `${f.file}:${f.line}: ${f.message}`);
-  return fail([`${ctx.rule}: ${r.found.length} finding${r.found.length === 1 ? "" : "s"}`, ...shown, ...(r.found.length > 20 ? ["…"] : [])].join("\n"));
+  return fail([`${ctx.rule}: ${r.found.length} finding${r.found.length === 1 ? "" : "s"}`, ...shown, ...(r.found.length > 20 ? ["…"] : []), "Fix the code at the findings above, or edit the law in VERDICT.md if it no longer holds"].join("\n"));
 }

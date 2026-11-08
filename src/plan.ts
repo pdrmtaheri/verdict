@@ -220,7 +220,7 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
     const proof = await prove(w, law.text, e, brk);
     if (proof.kind === "missed") return { problem: `${id} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
     if (proof.kind === "stale") return { problem: `the break for ${id} doesn't apply: ${proof.reason}`, notes };
-    if (proof.kind === "unknown") notes.push(`${id} was inconclusive on its break (${proof.result.message.split("\n")[0]})`);
+    if (proof.kind === "unknown") notes.push(`${id} was inconclusive on its break, so it is unproven (${proof.result.message.split("\n")[0]}): fix that, then run \`verdict plan --again ${law.hash}\``);
     else notes.push(`${id} caught its break: ${brk.description}`);
   }
   if (failsToday && !sub.finding) return { problem: "the law fails on today's code; describe the counterexample in finding", notes };

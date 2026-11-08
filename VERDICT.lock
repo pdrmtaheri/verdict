@@ -10,7 +10,7 @@
         (bare presence tests exempt), network calls; tests and .verdict/ not
         covered
       inputs:
-        .verdict/src-provider-boundary.test.ts: 7fd7d4ecca2b
+        .verdict/src-provider-boundary.test.ts: 40c57e6f6bd9
         bunfig.toml: e8acd4c297ca
 539d28d7:
   law: An agent's file tools never read or write outside the repository; the
