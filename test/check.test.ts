@@ -184,3 +184,16 @@ test.skipIf(!tlcAvailable)("a TLA+ enforcer passes when its invariant holds and 
     else process.env.VERDICT_TLA2TOOLS = saved;
   }
 }, 60_000);
+
+test("a decision enforcer without TYPESAFE_AI_API_KEY says to set it", async () => {
+  const saved = process.env.TYPESAFE_AI_API_KEY;
+  delete process.env.TYPESAFE_AI_API_KEY;
+  try {
+    const root = repo({ "msgs.txt": "error: failed\n", ".verdict/msgs.decision.json": decisionFile });
+    const r = await checkLaw(at(root), { law, enforcers: [{ kind: "decision", path: ".verdict/msgs.decision.json" }] });
+    expect(r.status).toBe("inconclusive");
+    expect(r.details[0]!.result.message).toContain("set it to your TypeSafe AI key");
+  } finally {
+    if (saved !== undefined) process.env.TYPESAFE_AI_API_KEY = saved;
+  }
+});
