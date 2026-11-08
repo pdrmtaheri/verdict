@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ruleFiles } from "./init.ts";
 import { decisionModelsAvailable } from "./models.ts";
@@ -12,7 +12,8 @@ import { enforcerId, writeLock, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
 import { inputsOf } from "./pins.ts";
 import { LINTERS, linterFor, scopeFiles } from "./linters.ts";
-import { reproveLaw, type Reproof } from "./reprove.ts";
+import { refreshSpecs, reproveLaw, type Reproof } from "./reprove.ts";
+import { modelsOf, stampModels } from "./specbind.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
 import { label, type Where } from "./where.ts";
 import { jobs, makeLimit, type Limit } from "./limit.ts";
@@ -34,9 +35,27 @@ Rules
   pattern rules for the shape of code, tests for behaviour, proofs for
   invariants worth proving, judges only for things that are readable but not
   mechanical. An LLM judge always works, so use it when nothing else fits.
+- Match the kind to what the law is about. A test is not the default.
+  - A banned call, import or pattern, or a naming or layering rule: semgrep,
+    never a test that greps the source.
+  - An invariant over states or orderings (never both, always eventually, no
+    lost update) that is worth proving: tla, with a test generated from it.
+  - Behaviour you can observe by running the code: test.
+  - Something readable rather than mechanical (copy, docs, error messages,
+    accessibility): llm, and decision when a command can print the text.
+  When a law has a readable side as well as a mechanical one (a page that must
+  say something in words, an error message that must tell the user what to do),
+  ship an llm judge next to the test: the test checks the mechanism, the judge
+  checks that a person would find it readable.
+  Before you settle on a test alone, say in suggestions which other kinds you
+  considered and why they don't fit.
 - Use the repo's own tooling when it is robust. Look at its config and
-  dependencies first. Prefer installed tools; if the best tool is missing,
-  still pick it and say so in suggestions.
+  dependencies first. If the right tool for the law is not installed (other
+  than TLC, covered below), still write that enforcer and submit it: verdict
+  records it as unproven and reports it inconclusive until the tool is
+  installed. Do not swap it for a test. Pair it with a test that checks the
+  same law in the repo's own framework, so the law is covered meanwhile, and
+  name the tool to install in suggestions.
 - Before writing a test, look for one the repo already has that checks the
   law. If one does, point at it instead of copying it: its path (outside
   ${OUT_DIR}/), the test's name if the file has others, and its scope in the
@@ -121,11 +140,18 @@ Enforcer kinds (the "kind" in submit) and their file formats
 - tla: a TLA+ spec (<slug>.tla plus <slug>.cfg), checked with TLC. Every part
   of the spec points to code a reviewer can open (cite file:function in
   comments), names come from the repo, and one indivisible step in the code is
-  one action in the spec. A spec only proves the design, so pair it with a test
-  generated from the spec: walk the spec's behaviours (bounded depth) and replay
-  each one against the real system through an adapter that maps spec actions to
-  public calls. The break for the spec itself is an edit to the code that the
-  generated test catches; a spec-only change is not a break.
+  one action in the spec. A spec only proves the design, so submit it together
+  with a test generated from it: walk the spec's behaviours (bounded depth) and
+  replay each one against the real system through an adapter that maps spec
+  actions to public calls.
+  Bind the spec to the code it models: add a comment line per file, written
+  "models: <path>" (for example "\\* models: public/controller.js"), relative to
+  the law's directory. verdict stamps each file's hash into that line. A spec
+  whose files changed fails with "the code this spec models changed" until
+  \`verdict plan\` re-stamps it, so the break for the spec is the same code edit
+  the replay test catches: any edit to a modeled file fails the spec, and the
+  replay test says whether the code still conforms. Name only the files the spec
+  really describes; every edit to them makes the spec stale.
 - decision: a decision model (jev by default) answering one choice question.
   JSON: {"scope": "...", "state_from": "<shell command that prints the text to
   judge>", "instructions": "<question>", "criteria": {"pass": "...", "fail":
@@ -202,6 +228,14 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
     } else {
       if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
       if (!e.scope && !scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
+      if (e.kind === "tla") {
+        const models = modelsOf(readFileSync(join(w.dir, e.path), "utf8"));
+        if (models.length === 0) return { problem: `${e.path} must name the code it models: add a comment line "models: <file>" for each file the spec describes. verdict stamps their hash, so a spec whose code changed fails, and a break to that code makes it fail`, notes };
+        const bad = models.find((m) => m.file.startsWith(OUT_DIR) || !existsSync(join(w.dir, m.file)));
+        if (bad) return { problem: `${e.path} says it models ${bad.file}, which is not a file of the system under check`, notes };
+        if (!sub.enforcers.some((x) => x.kind !== "tla")) return { problem: `a spec only proves the design: submit a test that replays ${e.path} against the real code alongside it`, notes };
+        stampModels(w.dir, e.path);
+      }
     }
     const today = await runInScratch(w, law.text, e);
     if (today.status === "fail") {
@@ -418,6 +452,7 @@ export async function plan(
         log(`planning again: ${law.text}`);
         say(`planned again: ${law.text}`);
       } else if (lock.has(law.hash)) {
+        await refreshSpecs(w, law, lock, say);
         const r = await reproveLaw(w, law, lock);
         logReproof(r, say);
         if (r.outcome !== "drift" && r.outcome !== "newly failing") {

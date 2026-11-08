@@ -9,6 +9,7 @@ import { exec, tail, which, type ExecResult } from "./exec.ts";
 import { sandboxed, sandboxFailure, SandboxUnavailable } from "./sandbox.ts";
 import { decisionModel } from "./models.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
+import { staleReason } from "./specbind.ts";
 import { readTools } from "./tools.ts";
 import { runLint } from "./linters.ts";
 
@@ -50,7 +51,7 @@ const semgrep: Runner = async (ctx) => {
   const { root, path } = ctx;
   const exe = findBin(root, "semgrep", ctx.repo ?? root);
   if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
-  const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"]);
+  const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--disable-version-check", "--quiet"]);
   if (r.code === 0) return pass();
   if (r.code === 1) return fail(`${tail(r.output)}\nFix the code at the findings above, or edit the law in VERDICT.md if it no longer holds`);
   return inconclusive(`semgrep exited ${r.code}: run \`semgrep --validate --config ${path}\` to see what's wrong with the rule, fix it or run \`verdict plan --again\`\n${tail(r.output)}`);
@@ -176,6 +177,8 @@ const lint: Runner = async (ctx) => {
 
 const tla: Runner = async (ctx) => {
   const { root, path } = ctx;
+  const stale = staleReason(root, path); // cheap, and the reason a code change makes this enforcer fail
+  if (stale) return fail(stale);
   const jar = process.env.VERDICT_TLA2TOOLS;
   const tlc = Bun.which("tlc") ? ["tlc"] : jar ? ["java", "-cp", jar, "tlc2.TLC"] : null;
   if (!tlc) return inconclusive("TLC is not installed (put tlc on PATH or set VERDICT_TLA2TOOLS to tla2tools.jar)");

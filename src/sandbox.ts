@@ -135,6 +135,15 @@ export function bwrapArgs(box: Box, home: string, cwd: string): string[] {
   return args;
 }
 
+// Tools like Semgrep read the system certificate store when they start, even for
+// a local scan. On macOS that means the keychain, which the sandbox denies on
+// purpose. Pointing them at the system's PEM bundle avoids the keychain.
+export function certEnv(): Record<string, string> {
+  if (process.env.SSL_CERT_FILE) return { SSL_CERT_FILE: process.env.SSL_CERT_FILE };
+  const bundle = ["/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt"].find((f) => existsSync(f));
+  return bundle ? { SSL_CERT_FILE: bundle } : {};
+}
+
 // Wraps argv so it runs inside the box. Returns the argv and environment to run.
 export function sandboxed(argv: string[], box: Box, cwd: string): { argv: string[]; env: Record<string, string> } {
   const home = real(homedir());
@@ -145,6 +154,7 @@ export function sandboxed(argv: string[], box: Box, cwd: string): { argv: string
     HOME: boxHome,
     TMPDIR: scratch,
     LANG: process.env.LANG ?? "C.UTF-8",
+    ...certEnv(),
     ...box.env,
   };
   const full: Box = { ...box, writable: [...box.writable, scratch] };

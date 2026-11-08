@@ -10,6 +10,7 @@ import type { Law } from "./laws.ts";
 import { enforcerId, type Lock, type LockEntry } from "./lock.ts";
 import { inputsOf } from "./pins.ts";
 import type { Result } from "./result.ts";
+import { isStale, staleReason, stampModels, STALE } from "./specbind.ts";
 
 // "fails today": it failed when it was planned too (no break), a known finding.
 // "newly failing": it passed when planned (it has a break) and fails now: a
@@ -35,11 +36,20 @@ export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproo
   let drift = false;
   let newlyFailing = false;
   let blocked = false;
+  let realFail = false;
+  let staleSpec = false; // while a spec is stale a failing test cannot say whether the code or the spec is wrong: triage decides
   for (const e of entry.enforcers) {
     const id = enforcerId(e);
     const now = today.details.find((d) => d.id === id)?.result;
     if (!now) continue; // an LLM judge skipped because its decision model was sure
+    if (now.status === "fail" && isStale(now.message)) {
+      drift = true; // the spec's code moved: plan re-stamps it or re-plans the law
+      staleSpec = true;
+      findings.push({ path: id, result: now });
+      continue;
+    }
     if (now.status === "fail") {
+      realFail = true;
       if (breakFor(breaks, e, entry.enforcers)) newlyFailing = true;
       findings.push({ path: id, result: now });
       continue;
@@ -61,9 +71,31 @@ export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproo
     findings.push({ path: id, result: describe(proof) });
   }
   const outcome: Outcome =
-    today.status === "fail" ? (newlyFailing ? "newly failing" : "fails today") : drift ? "drift" : blocked ? "blocked" : "in sync";
+    realFail && !staleSpec ? (newlyFailing ? "newly failing" : "fails today") : drift ? "drift" : blocked ? "blocked" : "in sync";
   const settled = (path: string) => findings.find((f) => f.path === path)?.result.status !== "inconclusive";
   const pinned = { ...entry, enforcers: entry.enforcers.map((e) => (settled(enforcerId(e)) ? { ...e, inputs: inputsOf(w, e) } : e)) };
   return { law, outcome, findings, pinned };
 }
 
+
+// A spec whose modeled code changed is stale. If the law's other enforcers (the
+// tests that replay the spec against the code) still pass on the new code, the
+// spec still describes it: re-stamp the hash, no model needed. If they fail,
+// leave it stale so reproveLaw reports drift and the law is re-planned.
+export async function refreshSpecs(w: Where, law: Law, lock: Lock, log: (line: string) => void): Promise<void> {
+  const entry = lock.get(law.hash);
+  if (!entry) return;
+  const stale = entry.enforcers.filter((e) => {
+    if (e.kind !== "tla") return false;
+    const why = staleReason(w.dir, e.path);
+    return why !== null && why.startsWith(STALE) && !why.includes("no longer exists");
+  });
+  const others = entry.enforcers.filter((e) => e.kind !== "tla");
+  if (stale.length === 0 || others.length === 0) return;
+  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), { ...entry, enforcers: others }, { sandbox: { readable: [w.repo] }, replay: false }));
+  if (today.status !== "pass") return;
+  for (const e of stale) {
+    stampModels(w.dir, e.path);
+    log(`  ${e.path}: the code it models changed, its tests still pass: re-stamped`);
+  }
+}

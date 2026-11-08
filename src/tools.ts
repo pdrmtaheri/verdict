@@ -215,7 +215,8 @@ export function writeTools(root: string, outDir: string, repo = root, claim: (ab
         else if (!Bun.which(bin)) return `${bin} is not installed`;
         const r = await withScratch(repo, async (copy) => {
           const dir = join(copy, relative(repo, root));
-          const box = sandboxed(argv, { readable: [copy, repo], writable: [copy], network: false }, dir);
+          const jar = process.env.VERDICT_TLA2TOOLS; // TLC, when the planner runs it through java
+          const box = sandboxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy], network: false }, dir);
           return exec(box.argv, { cwd: dir, env: box.env, cleanEnv: true, timeoutMs: 5 * 60_000 });
         });
         const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
