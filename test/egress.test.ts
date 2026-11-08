@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { join } from "node:path";
-import { copyBackLogin, sameAccount } from "../src/agents/codex.ts";
 import { startEgress } from "../src/egress.ts";
 import { macProfile } from "../src/sandbox.ts";
 
@@ -70,34 +69,6 @@ test.skipIf(!canUnix)("the forwarder carries a connection from its port to the p
     await egress.close();
     echo.close();
   }
-});
-
-const jwt = (sub: string) => `x.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.y`;
-const login = (account: string, sub: string, refresh: string) =>
-  JSON.stringify({ OPENAI_API_KEY: null, tokens: { id_token: jwt(sub), access_token: "a", refresh_token: refresh, account_id: account } });
-
-test("a refreshed Codex login is copied back only if it is the same account", () => {
-  const before = login("acct-1", "user-1", "r1");
-  expect(sameAccount(before, login("acct-1", "user-1", "r2"))).toBe(true);
-  expect(sameAccount(before, login("acct-2", "user-1", "r2"))).toBe(false); // another account
-  expect(sameAccount(before, login("acct-1", "user-2", "r2"))).toBe(false); // another user
-  expect(sameAccount(before, "not json")).toBe(false);
-
-  const d = dir();
-  const real = join(d, "real.json");
-  writeFileSync(real, before);
-  writeFileSync(join(d, "copy.json"), login("acct-2", "user-9", "r9"));
-  copyBackLogin(before, join(d, "copy.json"), real);
-  expect(readFileSync(real, "utf8")).toBe(before); // swapped account: ignored
-
-  writeFileSync(join(d, "elsewhere.json"), login("acct-1", "user-1", "r3"));
-  symlinkSync(join(d, "elsewhere.json"), join(d, "link.json"));
-  copyBackLogin(before, join(d, "link.json"), real);
-  expect(readFileSync(real, "utf8")).toBe(before); // a link: ignored
-
-  writeFileSync(join(d, "copy.json"), login("acct-1", "user-1", "r2"));
-  copyBackLogin(before, join(d, "copy.json"), real);
-  expect(readFileSync(real, "utf8")).toContain('"r2"'); // a real refresh: kept
 });
 
 test("Codex's sandbox may reach only the proxy's localhost port", () => {

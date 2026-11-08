@@ -255,8 +255,10 @@ Everything it can cause to run is therefore confined:
 - File tools resolve every path, refuse anything outside the repo, refuse
   dangling symlinks, and `write_file` writes only in `.verdict/`.
 - The git tool allows a fixed list of flags per subcommand.
-- Codex's app-server runs in the same sandbox, since its shell can't be
-  switched off. It has no network of its own: its only way out is verdict's
+- Codex's shell can't be switched off, so its threads run with approval
+  policy `untrusted`: only Codex's built-in safe read-only commands run
+  without asking, and verdict declines every approval request. The app-server
+  also runs in the same sandbox, with no network of its own: its only way out is verdict's
   egress proxy (`src/egress.ts`), which tunnels HTTPS to OpenAI's hosts
   (`VERDICT_CODEX_HOSTS`) and refuses everything else. On macOS the sandbox
   allows only the proxy's localhost port; on Linux the sandbox has its own
@@ -265,8 +267,12 @@ Everything it can cause to run is therefore confined:
   throwaway home turns on `respect_system_proxy`; if it connects directly, the
   sandbox refuses, so this fails closed. That throwaway home, under
   `~/.cache/verdict` where other sandboxes can't read, holds only a copy of
-  `auth.json`. A refreshed login is copied back only if it is a regular file and
-  the same account (`tokens.account_id` and the id token's `sub`).
+  `auth.json`, and nothing is copied back from it: a login written in the
+  sandbox can't be trusted. If Codex refreshed it, verdict says the user may
+  need to run `codex login`. Remaining risk: a safe-listed read can put the
+  repo or the login copy into the model's context; from there it can leave
+  only through Codex's own requests to OpenAI or through files in `.verdict/`,
+  which a person reviews.
 
 `verdict check` runs the reviewed enforcers in the real repo, unsandboxed:
 they are code that passed the merge review.
