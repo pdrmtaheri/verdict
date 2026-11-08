@@ -89,10 +89,24 @@ c4e910:
   enforcers:
     - decision: .verdict/actionable-errors.decision.json
     - llm: .verdict/actionable-errors.judge.md
+
+7b21e0:
+  law: Promises are always awaited or handled.
+  enforcers:
+    - lint: eslint.config.js
+      rule: "@typescript-eslint/no-floating-promises"
+      scope: src/**/*.ts
+      inputs:
+        eslint.config.js: 07bd5e21c4aa
+        package.json#typescript-eslint: ^8.40.0
 ```
 
-Nothing else goes in the lock: no severity, no trigger, no "holds today" state,
-no approval. Those are either inferred, run output, or the merge review's job.
+An enforcer is its kind and path, and may also record the one test to run in
+a file that has others (`name`), the rule for a lint enforcer (`rule`), the
+scope when verdict doesn't own the file and can't add a scope line (`scope`),
+and what it was proven against (`inputs`, see "Staying proven"). Nothing else
+goes in the lock: no severity, no trigger, no "holds today" state, no approval.
+Those are either inferred, run output, or the merge review's job.
 
 ## Commands
 
@@ -118,11 +132,21 @@ no approval. Those are either inferred, run output, or the merge review's job.
   may write only new files or files its own law owns, so parallel planners
   can't overwrite each other. Each law's results print as one block. Suggestions that would mean changing the system are printed, not
   written to the lock.
+- `verdict init`: draft a VERDICT.md from the rules a project already wrote
+  down for people and agents (AGENTS.md, CLAUDE.md, CONTRIBUTING.md,
+  `.cursor/rules`, Copilot instructions…). It keeps the checkable ones, cites
+  each one's source, and lists what it left out. It's a draft to edit and
+  never overwrites a VERDICT.md: those files change freely and mix rules with
+  advice, so verdict doesn't read them as laws. The planner gets them as
+  context.
 - `verdict check`: run every law's enforcers (all laws by default). Per law, the
   result is pass, fail or inconclusive, with a message quoting the law. A pass
   prints each enforcer's scope. Exit 0 when everything passes, 1 on any failure.
   Also reports laws that aren't planned or whose hash is stale. Laws run in
   parallel under the same `VERDICT_JOBS` limit; output keeps VERDICT.md's order.
+  `--format sarif` prints the report as SARIF 2.1.0 instead, for GitHub code
+  scanning and other tools that read linter output: one rule per law, an error
+  per failing enforcer, a note per inconclusive one, a warning per warning.
 
 ## Every check must be seen to fail
 
@@ -144,6 +168,40 @@ Findings stay findings. If a law is false today, the planner must not weaken the
 enforcer, its scope or its bounds until it passes. It submits the enforcer
 failing, with the counterexample as steps in the code's own words.
 
+## Staying proven
+
+A break proves an enforcer could fail when it was planned. It can stop being
+able to: someone weakens a test, skips it, excludes it in the runner's config,
+or turns a lint rule off, and the same pass now means less. This matters most
+for enforcers verdict doesn't own (a project's own tests and linter config),
+which people edit without thinking about verdict, but it applies to all.
+
+So the lock records each enforcer's inputs: a fingerprint of its file, of the
+config files it runs under (vitest/jest/playwright configs, bunfig.toml,
+pyproject.toml, go.mod, a TLA+ spec's .cfg, the lint config), and the version
+package.json asks for of its runner or linter packages. `plan` records them
+whenever it plans or re-proves a law (no model needed for a law in sync).
+
+`check` compares them on every run, and only replays what changed: when a
+passing enforcer's inputs differ, it applies the enforcer's break to a scratch
+copy and runs it there. Still caught is a warning (run `plan` to record the new
+inputs); a pass on the broken code fails the law. Unrelated edits don't block
+anyone, and `check` stays deterministic and writes nothing.
+
+`check` also warns about what it can see without running anything: a break
+that no longer applies to the code (its text is gone), an enforcer that passes
+but was never seen to fail (it failed when planned), an entry with no inputs
+recorded, and a lint rule's findings suppressed by disable comments. Some
+changes it detects directly and fails on: a test run where no test ran
+(skipped, filtered out or excluded: most runners exit 0), a lint rule turned
+off or ignored for any file in its scope, and a scope that matches no files.
+
+A break must change the system. It may not edit an enforcer's inputs, a
+package.json its runner is picked from, or anything on the test side of the
+repo: test files, snapshots, fixtures, mocks, testdata, conftest.py, any
+`.verdict/`. Paths are compared with symlinks resolved and case folded where
+the filesystem ignores case.
+
 Every enforcer file states its scope: a `scope:` line near the top (a `scope`
 field in JSON), saying what it covers, its bounds and assumptions, and what it
 leaves out. A pass covers that scope, not the system.
@@ -154,8 +212,8 @@ All four observe from outside.
 
 | Kind | Covers | Ships with | Picked when the law is… |
 |---|---|---|---|
-| Lint / pattern | Semgrep only (type-aware rules: see below) | Should-flag / should-pass tests in the tool's own format | About the shape of the code |
-| Tests | Unit, property, fuzz, E2E, DST, spec-generated | Nothing extra: the test is the example | About behaviour |
+| Lint / pattern | Semgrep for rules verdict writes (type-aware rules: see below); a rule the project's own linter already has (eslint, ruff) | Should-flag / should-pass tests in the tool's own format; for an existing rule, its break | About the shape of the code |
+| Tests | Unit, property, fuzz, E2E, DST, spec-generated; or a test the project already has | Nothing extra: the test is the example | About behaviour |
 | Proofs / models | TLA+, Bend | Nothing extra: a checker verifies it | An invariant worth proving |
 | Judges | LLM, decision models (jev) | Evals | Readable but not mechanical (copy, docs, transcripts) |
 
@@ -164,15 +222,22 @@ enforcer.
 
 ### Pattern rules and type-aware rules
 
-Semgrep is the only pattern-rule engine: one rule format and one test format
-(`semgrep --test`) across every language. Semgrep mostly matches syntax, so a
+When the project's own linter already checks the law, the planner points at
+that rule instead of writing one: a `lint` enforcer names the linter's config
+file, the rule id and a scope (globs). verdict runs the linter under that config
+and keeps only that rule's findings in the scope; the tool is inferred from the
+config's file name. It never writes linter rules or configs. For a linter
+verdict can't read, an executable test runs it.
+
+For rules verdict writes, Semgrep is the only pattern-rule engine: one rule
+format and one test format (`semgrep --test`) across every language. Semgrep mostly matches syntax, so a
 law that depends on types goes down this list, stopping at the first rung that
 can express it:
 
 1. Semgrep typed metavariables (`(float $X)`) where the language supports them.
-2. An executable test script that runs one built-in rule of a type-aware tool
-   the repo already uses (`cargo clippy -- -D clippy::float_arithmetic`, a
-   typescript-eslint typed rule, `ruff --select`).
+2. One built-in rule of a type-aware tool the repo already uses: a `lint`
+   enforcer for a typescript-eslint typed rule or a ruff rule, or an
+   executable test that runs it (`cargo clippy -- -D clippy::float_arithmetic`).
 3. A custom analyzer in the language's own framework (go/analysis, a
    typescript-eslint rule), kept in `.verdict/` and run by a test script.
 4. A behavioural test, or an LLM judge.
@@ -186,6 +251,12 @@ property tests (random inputs), fuzzing (coverage-guided inputs), DST
 (interleavings of time, network and faults). verdict doesn't manage
 environments. A test does its own setup, the way E2E frameworks already do, and
 verdict will likely use those frameworks under the hood.
+
+When the project already has a test that checks the law, the planner points at
+it rather than copying it: its path outside `.verdict/`, the test's name if the
+file has others, and its scope in the lock. verdict never edits that file. The
+name is passed to the runner (`-t` for bun, vitest and jest, `-g` for
+playwright, `-run` for go, a pytest node id).
 
 ### Judges
 
@@ -311,7 +382,8 @@ How each kind runs. These rules are inferred, not configured:
 | Kind | Command | Pass / fail / inconclusive |
 |---|---|---|
 | semgrep | `semgrep scan --config <file> --error` over the whole repo | exit 0 / 1 / other, or semgrep missing |
-| test | Inferred from the file name: `*.test.*`/`*.spec.*` → vitest, jest, playwright or bun test (from package.json); `*_test.go` → go test; `test_*.py` → pytest; an executable file → run it | exit 0 / non-zero / 77 (automake's "skipped": a precondition is missing) or runner missing |
+| lint | The linter the config file belongs to (eslint, ruff), under that config, over the scope's files; first asks it whether the rule applies to each file | no findings for the rule / findings, or the rule off for any file / linter missing or can't say |
+| test | Inferred from the file name: `*.test.*`/`*.spec.*` → vitest, jest, playwright or bun test (from package.json); `*_test.go` → go test; `test_*.py` → pytest; an executable file → run it. A `name` selects one test | exit 0 / non-zero, or exit 0 with no test run / 77 (automake's "skipped": a precondition is missing) or runner missing |
 | tla | TLC (`tlc` on PATH or `VERDICT_TLA2TOOLS` jar); `<spec>.cfg` next to it | exit 0 / 10–14 (violations) / other |
 | decision | `sh -c state_from`, then one choice question | see Judges |
 | llm | A tool loop with read_file, list_files, grep and read-only git; ends with a submit tool | the judge's answer |
@@ -325,7 +397,8 @@ a scratch copy) and `write_file`, which is confined to
 tlc, type-aware tools) or its own scripts in `.verdict/`, with no shell, so it
 can validate what it wrote. Its `submit` is checked before it's accepted: each
 enforcer is inside `.verdict/`, has a scope line, and either fails today (with a
-finding) or fails on its break. A rejected submit goes back to the planner with
+finding) or fails on its break. Outside `.verdict/`, only a test or a linter
+config the repo already has is allowed, with its scope given in the submission. A rejected submit goes back to the planner with
 the reason.
 
 Gaps in v1:
@@ -338,8 +411,12 @@ Gaps in v1:
 ## Not in v1
 
 - Type-based enforcement suggestions (later iteration).
-- Linter conventions: baselines, inline suppressions, severity, output formats,
-  autofix, per-path overrides.
+- Linter conventions: baselines, severity, autofix. (Suppressions are warned
+  about, and SARIF is the one output format besides text.)
+- Lint enforcers for linters other than eslint and ruff (golangci-lint,
+  clippy, biome…); until then, an executable test runs them.
+- Helpers a `.verdict/` enforcer imports are not among its inputs; edits to
+  them show up in review as changes to `.verdict/`.
 
 ## Prior art to keep in mind
 
