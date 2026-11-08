@@ -248,7 +248,14 @@ const llm: Runner = async (ctx) => {
     submit: { description: "Report your verdict on the law.", schema: Verdict },
   });
   if (!verdict) return inconclusive("the judge stopped without a verdict: run verdict check again, or set a stronger VERDICT_MODEL or VERDICT_REASONING=high");
-  return { status: verdict.status, message: verdict.reason };
+  // The judge's reason says where; verdict adds what to do about it.
+  const next =
+    verdict.status === "fail"
+      ? "Fix the code it names, or edit the law in VERDICT.md if it no longer holds"
+      : verdict.status === "inconclusive"
+        ? `Add hints to ${path} on where to look, or run \`verdict plan --again\` to re-plan the law`
+        : "";
+  return { status: verdict.status, message: next ? `${verdict.reason}\n${next}` : verdict.reason };
 };
 
 // ---------------------------------------------------------------- scope

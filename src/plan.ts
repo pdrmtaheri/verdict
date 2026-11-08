@@ -205,11 +205,11 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
     const today = await runInScratch(w, law.text, e);
     if (today.status === "fail") {
       failsToday = true;
-      notes.push(`${e.path} fails on today's code`);
+      notes.push(`${enforcerId(e)} fails on today's code: see the finding below`);
       continue;
     }
     if (today.status === "inconclusive") {
-      notes.push(`${e.path} is inconclusive today and is unproven (${today.message.split("\n")[0]})`);
+      notes.push(`${enforcerId(e)} is inconclusive today, so it is unproven (${today.message.split("\n")[0]}): fix that, then run \`verdict plan --again ${law.hash}\` to prove it`);
       continue;
     }
     const id = enforcerId(e);
@@ -249,6 +249,8 @@ export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: st
   const installed = PROBE.filter((t) => which(w.dir, t));
   const jar = process.env.VERDICT_TLA2TOOLS;
   if (jar && existsSync(jar) && !installed.includes("tlc")) installed.push("tlc (tla2tools.jar via VERDICT_TLA2TOOLS)");
+  // A decision enforcer runs only with a key; without one it's always inconclusive.
+  installed.push(process.env.TYPESAFE_AI_API_KEY ? "decision models (TYPESAFE_AI_API_KEY is set)" : "no decision models (TYPESAFE_AI_API_KEY isn't set: use an llm judge instead)");
   const where =
     w.dir === w.repo
       ? "The law is declared in VERDICT.md at the repo root and applies to the whole repo."
@@ -292,7 +294,10 @@ export function logOutcome(o: PlanOutcome, log: (line: string) => void): void {
   if (!o.entry) return log(`  error: ${o.error}`);
   for (const e of o.entry.enforcers) log(`  ${e.kind}: ${e.path}`);
   for (const n of o.notes) log(`  ${n}`);
-  if (o.finding) log(`  finding: the law looks false in today's code:\n${o.finding.replace(/^/gm, "    ")}`);
+  if (o.finding) {
+    log(`  finding: the law looks false in today's code:\n${o.finding.replace(/^/gm, "    ")}`);
+    log("  verdict check fails this law until the code is fixed; if the law changed on purpose, edit it in VERDICT.md and run `verdict plan`");
+  }
   for (const s of o.suggestions) log(`  suggestion: ${s}`);
 }
 
