@@ -9,7 +9,6 @@
     "no-unused-vars": "error"
   },
   "ignorePatterns": [
-    "node_modules/**",
-    ".verdict/no-dynamic-code.ts"
+    "node_modules/**"
   ]
 }

@@ -31,5 +31,16 @@
         "replace": "const box = sandboxed(argv, { readable: [copy, repo], writable: [copy, repo], network: false }, dir);"
       }
     ]
+  },
+  {
+    "enforcer": ".verdict/agent-builtin-tools.judge.md",
+    "description": "claude-code.ts turns Claude Code's built-in tools (Bash, Read, Edit…) on with the claude_code preset instead of tools: [], so the agent can read and write outside the repo",
+    "edits": [
+      {
+        "path": "src/agents/claude-code.ts",
+        "find": "        tools: [], // no built-in tools: only verdict's\n",
+        "replace": "        tools: { type: \"preset\", preset: \"claude_code\" }, // Claude Code's own tools alongside verdict's\n"
+      }
+    ]
   }
 ]

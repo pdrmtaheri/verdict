@@ -110,8 +110,12 @@ f25eb789:
     constructor anywhere in src/."
   enforcers:
     - test: .verdict/no-eval.sh
-      scope: src/** linted by oxlint no-eval, no-new-func, no-implied-eval
       inputs:
         .verdict/no-eval.sh: 1c40d7480144
         .verdict/no-eval.json: fcafdd16595f
+        bunfig.toml: e8acd4c297ca
+    - test: .verdict/no-dynamic-code-scan.test.ts
+      inputs:
+        .verdict/no-dynamic-code-scan.test.ts: 19dbddc3b528
+        .verdict/no-eval.sh: 1c40d7480144
         bunfig.toml: e8acd4c297ca
