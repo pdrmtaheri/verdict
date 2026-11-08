@@ -10,7 +10,10 @@ import type { Law } from "./laws.ts";
 import type { Lock } from "./lock.ts";
 import type { Result } from "./result.ts";
 
-export type Outcome = "in sync" | "drift" | "fails today" | "blocked" | "not planned";
+// "fails today": it failed when it was planned too (no break), a known finding.
+// "newly failing": it passed when planned (it has a break) and fails now: a
+// regression, or an enforcer that depended on something incidental.
+export type Outcome = "in sync" | "drift" | "newly failing" | "fails today" | "blocked" | "not planned";
 
 export interface Reproof {
   law: Law;
@@ -26,11 +29,13 @@ export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproo
   const breaks = readBreaks(w.dir, law.hash);
   const findings: Reproof["findings"] = [];
   let drift = false;
+  let newlyFailing = false;
   let blocked = false;
   for (const e of entry.enforcers) {
     const now = today.details.find((d) => d.path === e.path)?.result;
     if (!now) continue; // an LLM judge skipped because its decision model was sure
     if (now.status === "fail") {
+      if (breaks.some((b) => b.enforcer === e.path)) newlyFailing = true;
       findings.push({ path: e.path, result: now });
       continue;
     }
@@ -51,7 +56,7 @@ export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproo
     findings.push({ path: e.path, result: describe(proof) });
   }
   const outcome: Outcome =
-    today.status === "fail" ? "fails today" : drift ? "drift" : blocked ? "blocked" : "in sync";
+    today.status === "fail" ? (newlyFailing ? "newly failing" : "fails today") : drift ? "drift" : blocked ? "blocked" : "in sync";
   return { law, outcome, findings };
 }
 

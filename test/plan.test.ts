@@ -127,8 +127,9 @@ test("plan re-plans a drifted law with the triage rules, and leaves in-sync laws
   expect(again.prompts.length).toBe(0);
 });
 
-test("plan reports a law that fails today without re-planning it", async () => {
+test("plan reports a law that already failed when planned, without re-planning it", async () => {
   const { root, lock } = planned("export const amount = 0.5;\n");
+  writeBreaks(root, law!.hash, []); // it failed when planned, so it has no break
   const model = scriptedAgent([]);
   agents.agent = model;
   const log: string[] = [];
@@ -144,4 +145,15 @@ test("a test that exits 77 is inconclusive, and check prints scopes on a pass", 
   expect(skipped.details[0]!.result.message).toContain("payments sandbox is down");
   const ok = await checkLaw(at(root), { law: LAW, enforcers: [enforcer] });
   expect(format([ok])).toContain("pass (scope: src/money.ts only)");
+});
+
+test("plan re-plans a law that passed when planned and fails now", async () => {
+  const { root, lock } = planned("export const amount = 0.5;\n"); // its break exists: it passed once
+  const model = scriptedAgent([submit({ finding: "src/money.ts:1 is a float again" })]);
+  agents.agent = model;
+  const log: string[] = [];
+  await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l));
+  expect(log.join("\n")).toContain("newly failing: Amounts are stored in cents.");
+  expect(model.prompts[0]).toContain("passed when it was planned");
+  expect(model.prompts[0]).toContain("something incidental");
 });

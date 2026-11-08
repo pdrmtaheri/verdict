@@ -248,10 +248,11 @@ async function lastProven(w: Where, hash: string): Promise<string | null> {
   return r.code === 0 && r.output ? r.output : null;
 }
 
-const TRIAGE = `This law is already planned, but an enforcer can no longer be shown to
-fail on today's code: its break no longer applies, or the enforcer passes on
-code broken on purpose. The current enforcers are listed below; read them, and
-read the code as it is now. Decide which of these happened, and say which in
+const TRIAGE = `This law is already planned, but something changed: an enforcer can no
+longer be shown to fail on today's code (its break no longer applies, or it
+passes on code broken on purpose), or an enforcer passed when it was planned
+and fails now. The current enforcers are listed below; read them, and read
+the code as it is now. Decide which of these happened, and say which in
 suggestions:
 - The enforcer no longer describes the code (a function moved, a step split, a
   new path writes the guarded state). Update the enforcer and its break from the
@@ -260,8 +261,11 @@ suggestions:
 - The promise changed on purpose, and evidence says so (a commit message, docs,
   tests, a changelog). Don't change what the enforcer checks; cite the evidence
   and suggest that a person edit the law in VERDICT.md.
-- The code breaks the law. Keep the enforcer failing and put the counterexample
-  in finding, naming the commit that introduced it if you can find it.
+- The enforcer depended on something incidental that changed while the promise
+  still holds: an exact message, a file's path, an import. Make it check the
+  promise itself, and say what it depended on.
+- The code breaks the law (a regression). Keep the enforcer failing and put the
+  counterexample in finding, naming the commit that introduced it if you can.
 Never weaken an enforcer to make it pass.`;
 
 async function triageContext(w: Where, law: Law, lock: Lock, r: Reproof): Promise<string> {
@@ -313,8 +317,9 @@ export interface PlanOptions {
 // Brings the lock in line with VERDICT.md and the code, like a package
 // manager's sync: laws that are new or reworded get planned; planned laws get
 // their breaks replayed on today's code, and the ones that drifted (a break no
-// longer applies, or an enforcer can't see it) get re-planned. Laws that fail
-// today are reported, not re-planned: that is a finding, not drift.
+// longer applies, or an enforcer can't see it) get re-planned, as do laws that
+// passed when planned and fail now. A law that already failed when it was
+// planned is reported, not re-planned: that is a known finding.
 // Entries for removed laws are dropped.
 //
 // Laws run in parallel, up to the limit. Each law's results are logged as one
@@ -342,7 +347,7 @@ export async function plan(
       if (lock.has(law.hash)) {
         const r = await reproveLaw(w, law, lock);
         logReproof(r, say);
-        if (r.outcome !== "drift") return;
+        if (r.outcome !== "drift" && r.outcome !== "newly failing") return;
         context = await triageContext(w, law, lock, r);
         say(`  re-planning`);
       } else {

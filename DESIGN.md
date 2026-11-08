@@ -108,8 +108,10 @@ no approval. Those are either inferred, run output, or the merge review's job.
     enforcer no longer describes the code (fix it from the code), the promise
     changed on purpose (cite the evidence, suggest editing the law), or the code
     breaks the law (a finding).
-  A law that simply fails today is reported, not re-planned: that's a finding,
-  not drift. Laws, from every VERDICT.md, are planned in parallel, up to
+  A law that passed when it was planned and fails now is re-planned the same
+  way: it's a regression, or an enforcer that depended on something incidental
+  (an exact message, a path). A law that already failed when it was planned
+  is reported, not re-planned: that's a known finding. Laws, from every VERDICT.md, are planned in parallel, up to
   `VERDICT_JOBS` at once (default 4; each is one agent session). A planner
   may write only new files or files its own law owns, so parallel planners
   can't overwrite each other. Each law's results print as one block. Suggestions that would mean changing the system are printed, not
