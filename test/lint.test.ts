@@ -144,3 +144,22 @@ test("oxlint: disable comments are reported", async () => {
   expect(r.status).toBe("pass");
   expect(r.details[0]!.warnings.join("\n")).toContain("1 finding of no-var suppressed");
 });
+
+test("two rules of one oxlint config are two enforcers, each with its own break", async () => {
+  const root = ox({ "src/a.ts": "export const a: number = 1;\n" });
+  const noVar = { ...oxE }, noAny = { ...oxE, rule: "typescript/no-explicit-any" };
+  const breaks = [
+    { enforcer: ".oxlintrc.json#no-var", description: "var", edits: [{ path: "src/a.ts", find: "export const a", replace: "var a" }] },
+    { enforcer: ".oxlintrc.json#typescript/no-explicit-any", description: "any", edits: [{ path: "src/a.ts", find: ": number", replace: ": any" }] },
+  ];
+  const model = scriptedAgent([
+    { tool: "submit", input: { enforcers: [noVar, noAny], breaks: breaks.slice(0, 1), suggestions: [] } },
+    { tool: "submit", input: { enforcers: [noVar, noAny], breaks, suggestions: [] } },
+  ]);
+  agents.agent = model;
+  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {})).toBe(true);
+  expect(model.results[0]).toContain('break with enforcer ".oxlintrc.json#typescript/no-explicit-any"');
+  const r = (await check(at(root), [law!], readLock(join(root, "VERDICT.lock"))))[0]!;
+  expect(r.status).toBe("pass");
+  expect(r.details.map((d) => d.id)).toEqual([".oxlintrc.json#no-var", ".oxlintrc.json#typescript/no-explicit-any"]);
+});

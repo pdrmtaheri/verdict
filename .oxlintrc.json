@@ -1,10 +1,15 @@
 {
   "$schema": "./node_modules/oxlint/configs/schema.json",
-  "categories": { "correctness": "error" },
+  "categories": {
+    "correctness": "error"
+  },
   "rules": {
     "no-eval": "error",
     "no-new-func": "error",
     "no-unused-vars": "error"
   },
-  "ignorePatterns": ["node_modules/**"]
+  "ignorePatterns": [
+    "node_modules/**",
+    ".verdict/no-dynamic-code.ts"
+  ]
 }

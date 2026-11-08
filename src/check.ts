@@ -1,8 +1,8 @@
-import { describe, prove, readBreaks, stale } from "./breaks.ts";
+import { breakFor, describe, prove, readBreaks, stale } from "./breaks.ts";
 import { runEnforcer, scopeOf } from "./enforcers.ts";
 import { changes, inputsOf } from "./pins.ts";
 import type { Law } from "./laws.ts";
-import type { Enforcer, Lock, LockEntry } from "./lock.ts";
+import { enforcerId, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
 import type { Where } from "./where.ts";
 import { jobs, makeLimit, type Limit } from "./limit.ts";
 import { combine, fail, inconclusive, type Result, type Status } from "./result.ts";
@@ -14,7 +14,7 @@ export interface LawReport {
   status: Status | "unplanned";
   // warnings: what changed since the enforcer was proven, and what verdict
   // did about it. They don't change the status on their own.
-  details: { kind: string; path: string; result: Result; scope: string | null; warnings: string[] }[];
+  details: { id: string; kind: string; path: string; result: Result; scope: string | null; warnings: string[] }[];
 }
 
 export interface CheckOptions {
@@ -33,8 +33,8 @@ export async function checkLaw(w: Where, entry: LockEntry, opts: CheckOptions = 
   const run = async (e: Enforcer) => {
     let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, name: e.name, rule: e.rule, scope: e.scope, sandbox: opts.sandbox });
     const warnings: string[] = [...(result.warnings ?? [])];
-    if (opts.replay !== false && result.status === "pass") result = await guard(w, entry.law, e, breaks, result, warnings);
-    details.push({ kind: e.kind, path: e.path, result, scope: e.scope ?? scopeOf(w.dir, e.path), warnings });
+    if (opts.replay !== false && result.status === "pass") result = await guard(w, entry.law, e, breakFor(breaks, e, entry.enforcers), result, warnings);
+    details.push({ id: enforcerId(e), kind: e.kind, path: e.path, result, scope: e.scope ?? scopeOf(w.dir, e.path), warnings });
     return result;
   };
 
@@ -55,8 +55,7 @@ export async function checkLaw(w: Where, entry: LockEntry, opts: CheckOptions = 
 // A pass counts only while the enforcer is still the one that was seen to
 // fail. Warns about what changed; when its inputs changed, replays its break
 // on a scratch copy and fails the enforcer if the break now passes.
-async function guard(w: Where, law: string, e: Enforcer, breaks: Break[], result: Result, warnings: string[]): Promise<Result> {
-  const brk = breaks.find((b) => b.enforcer === e.path);
+async function guard(w: Where, law: string, e: Enforcer, brk: Break | undefined, result: Result, warnings: string[]): Promise<Result> {
   if (!brk) {
     warnings.push("passes, but has never been seen to fail (it failed when it was planned, so it has no break): run `verdict plan` to prove it");
     return result;
@@ -111,7 +110,7 @@ export function format(reports: LawReport[], summary = true): string {
     if (r.status === "unplanned") out.push(`              run \`verdict plan\` (new law, or its wording changed)`);
     for (const d of r.details) {
       const scope = d.scope ? ` (scope: ${d.scope})` : "";
-      out.push(`              ${d.kind} ${d.path}: ${d.result.status}${d.result.status === "pass" ? scope : ""}`);
+      out.push(`              ${d.kind} ${d.id}: ${d.result.status}${d.result.status === "pass" ? scope : ""}`);
       for (const line of d.result.message.split("\n")) if (line) out.push(`                ${line}`);
       for (const w of d.warnings) out.push(`                warning: ${w}`);
     }

@@ -160,8 +160,10 @@ those test the rule, while the break tests the rule's reach into the real code.
 For judges, the break is the eval.
 
 Breaks ship with the enforcers in `.verdict/breaks/<law hash>.json`, as
-`{enforcer, description, edits: [{path, find, replace}]}`. They are not in the
-lock. The commit at which a law was last proven is inferred from git (the last
+`{enforcer, description, edits: [{path, find, replace}]}`, where `enforcer` is
+the enforcer's path, plus `#<rule>` or `#<test name>` when it has one (two
+rules of one linter config are two enforcers, each with its own break). They
+are not in the lock. The commit at which a law was last proven is inferred from git (the last
 commit that touched its breaks file), not stored.
 
 Findings stay findings. If a law is false today, the planner must not weaken the

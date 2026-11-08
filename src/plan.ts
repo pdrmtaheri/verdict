@@ -3,11 +3,11 @@ import { join, relative } from "node:path";
 import { ruleFiles } from "./init.ts";
 import { z } from "zod";
 import { defineTool, runAgent } from "./agent.ts";
-import { Break, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
+import { Break, breakFor, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
 import { KINDS, scopeOf, SKIPPED } from "./enforcers.ts";
 import { exec, which } from "./exec.ts";
 import type { Law } from "./laws.ts";
-import { writeLock, type Lock, type LockEntry } from "./lock.ts";
+import { enforcerId, writeLock, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
 import { inputsOf } from "./pins.ts";
 import { LINTERS, linterFor, scopeFiles } from "./linters.ts";
@@ -212,13 +212,15 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
       notes.push(`${e.path} is inconclusive today and is unproven (${today.message.split("\n")[0]})`);
       continue;
     }
-    const brk = sub.breaks.find((b) => b.enforcer === e.path);
-    if (!brk) return { problem: `${e.path} passes today; submit a break that makes it fail`, notes };
+    const id = enforcerId(e);
+    if (sub.enforcers.filter((o) => enforcerId(o) === id).length > 1) return { problem: `${id} is listed twice: give each enforcer a different path, rule or test name`, notes };
+    const brk = breakFor(sub.breaks, e, sub.enforcers);
+    if (!brk) return { problem: `${id} passes today; submit a break with enforcer "${id}" that makes it fail`, notes };
     const proof = await prove(w, law.text, e, brk);
-    if (proof.kind === "missed") return { problem: `${e.path} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
-    if (proof.kind === "stale") return { problem: `the break for ${e.path} doesn't apply: ${proof.reason}`, notes };
-    if (proof.kind === "unknown") notes.push(`${e.path} was inconclusive on its break (${proof.result.message.split("\n")[0]})`);
-    else notes.push(`${e.path} caught its break: ${brk.description}`);
+    if (proof.kind === "missed") return { problem: `${id} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
+    if (proof.kind === "stale") return { problem: `the break for ${id} doesn't apply: ${proof.reason}`, notes };
+    if (proof.kind === "unknown") notes.push(`${id} was inconclusive on its break (${proof.result.message.split("\n")[0]})`);
+    else notes.push(`${id} caught its break: ${brk.description}`);
   }
   if (failsToday && !sub.finding) return { problem: "the law fails on today's code; describe the counterexample in finding", notes };
   return { problem: null, notes };
@@ -235,7 +237,7 @@ function planTools(w: Where, law: Law) {
       description: "Apply edits to a scratch copy of the repo and run one enforcer there. The repo is never changed.",
       schema: z.object({ enforcer: EnforcerRef, edits: z.array(Edit).min(1) }),
       execute: async ({ enforcer, edits }) => {
-        const p = await prove(w, law.text, enforcer, { enforcer: enforcer.path, description: "trial", edits });
+        const p = await prove(w, law.text, enforcer, { enforcer: enforcerId(enforcer), description: "trial", edits });
         if (p.kind === "stale") return `the edits don't apply: ${p.reason}`;
         return `${p.kind === "caught" ? "caught" : p.kind === "missed" ? "missed: the enforcer passed" : "inconclusive"} (${show(p.result)})`;
       },
@@ -279,7 +281,7 @@ export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: st
   return {
     law,
     entry: { law: law.text, enforcers: submission.enforcers },
-    breaks: submission.breaks.filter((b) => submission.enforcers.some((e) => e.path === b.enforcer)),
+    breaks: submission.breaks.filter((b) => submission.enforcers.some((e) => breakFor([b], e, submission.enforcers))),
     finding: submission.finding,
     notes,
     suggestions: submission.suggestions,

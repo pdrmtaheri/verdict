@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { runEnforcer } from "./enforcers.ts";
-import type { Enforcer } from "./lock.ts";
+import { enforcerId, type Enforcer } from "./lock.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { withScratch } from "./scratch.ts";
 import { pinnedFiles } from "./pins.ts";
@@ -20,7 +20,7 @@ export const Edit = z.object({
 });
 
 export const Break = z.object({
-  enforcer: z.string().describe("Path of the enforcer this break must make fail"),
+  enforcer: z.string().describe('The enforcer this break must make fail: its path, plus "#<rule>" for a lint enforcer or "#<name>" for a named test'),
   description: z.string().describe("What the break does, in the code's own words"),
   edits: z.array(Edit).min(1),
 });
@@ -43,6 +43,12 @@ export type Proof =
   | { kind: "missed"; result: Result } // it passed: the enforcer can't see this break
   | { kind: "stale"; reason: string } // the break no longer applies: the code moved
   | { kind: "unknown"; result: Result }; // the enforcer was inconclusive
+
+// The break for this enforcer: by its id, or, for a break recorded before ids
+// had a rule or name, by its path when no other enforcer shares the path.
+export function breakFor(breaks: Break[], e: Enforcer, all: Enforcer[] = [e]): Break | undefined {
+  return breaks.find((b) => b.enforcer === enforcerId(e)) ?? (all.filter((o) => o.path === e.path).length === 1 ? breaks.find((b) => b.enforcer === e.path) : undefined);
+}
 
 // Applies the break to a scratch copy and runs the enforcer there.
 export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Break): Promise<Proof> {

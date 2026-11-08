@@ -20,6 +20,11 @@ export interface Enforcer {
   inputs?: Inputs;
 }
 
+// Which enforcer a break or a result belongs to. Two enforcers can share a
+// path (two rules of one linter config, two tests in one file), so the rule
+// or the test's name is part of it: "eslint.config.js#no-var".
+export const enforcerId = (e: Enforcer): string => (e.rule ? `${e.path}#${e.rule}` : e.name ? `${e.path}#${e.name}` : e.path);
+
 export interface LockEntry {
   law: string;
   enforcers: Enforcer[];
