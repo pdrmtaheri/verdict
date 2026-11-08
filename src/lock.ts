@@ -34,13 +34,27 @@ export type Lock = Map<string, LockEntry>;
 
 const FIELDS = ["name", "rule", "scope", "inputs"];
 
+// A lock verdict can't read: a merge conflict, a hand edit gone wrong.
+export class BadLock extends Error {}
+
 export function readLock(file: string): Lock {
   const lock: Lock = new Map();
   if (!existsSync(file)) return lock;
-  const raw = (YAML.parse(readFileSync(file, "utf8")) ?? {}) as Record<
-    string,
-    { law: string; enforcers?: Record<string, unknown>[] }
-  >;
+  const fix = "restore it from git (`git checkout -- VERDICT.lock`), or delete it and run `verdict plan` to plan every law again";
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(readFileSync(file, "utf8")) ?? {};
+  } catch (err) {
+    const where = (err as { linePos?: { line: number }[] }).linePos?.[0]?.line;
+    throw new BadLock(`${file} is not valid YAML${where ? ` (line ${where})` : ""}: ${fix}`);
+  }
+  const shaped = (e: unknown) =>
+    !!e && typeof e === "object" && typeof (e as { law?: unknown }).law === "string" &&
+    ((e as { enforcers?: unknown }).enforcers === undefined || Array.isArray((e as { enforcers?: unknown }).enforcers));
+  if (typeof parsed !== "object" || Array.isArray(parsed) || !Object.values(parsed as object).every(shaped)) {
+    throw new BadLock(`${file} isn't a verdict lock (each entry needs a law and a list of enforcers): ${fix}`);
+  }
+  const raw = parsed as Record<string, { law: string; enforcers?: Record<string, unknown>[] }>;
   for (const [hash, entry] of Object.entries(raw)) {
     const enforcers = (entry.enforcers ?? []).flatMap((e): Enforcer[] => {
       const kind = Object.keys(e).find((k) => !FIELDS.includes(k));

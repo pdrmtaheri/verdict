@@ -11,6 +11,10 @@ export const DEFAULT_DECISION_MODEL = "jev-1.14.0";
 // Tests swap in a mock decision model here.
 export const overrides: { decision?: Experimental_DecisionModel } = {};
 
+// Whether decision-model enforcers can run here (a key is set, or a test
+// swapped in a model). The planner asks before picking one.
+export const decisionModelsAvailable = (): boolean => !!overrides.decision || !!process.env.TYPESAFE_AI_API_KEY;
+
 export function decisionModel(id = process.env.VERDICT_DECISION_MODEL ?? DEFAULT_DECISION_MODEL): Experimental_DecisionModel {
   if (overrides.decision) return overrides.decision;
   if (!process.env.TYPESAFE_AI_API_KEY) {

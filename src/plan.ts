@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ruleFiles } from "./init.ts";
+import { decisionModelsAvailable } from "./models.ts";
 import { z } from "zod";
 import { defineTool, runAgent } from "./agent.ts";
 import { Break, breakFor, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
@@ -250,7 +251,7 @@ export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: st
   const jar = process.env.VERDICT_TLA2TOOLS;
   if (jar && existsSync(jar) && !installed.includes("tlc")) installed.push("tlc (tla2tools.jar via VERDICT_TLA2TOOLS)");
   // A decision enforcer runs only with a key; without one it's always inconclusive.
-  installed.push(process.env.TYPESAFE_AI_API_KEY ? "decision models (TYPESAFE_AI_API_KEY is set)" : "no decision models (TYPESAFE_AI_API_KEY isn't set: use an llm judge instead)");
+  installed.push(decisionModelsAvailable() ? "decision models (TYPESAFE_AI_API_KEY is set)" : "no decision models (TYPESAFE_AI_API_KEY isn't set: use an llm judge instead)");
   const where =
     w.dir === w.repo
       ? "The law is declared in VERDICT.md at the repo root and applies to the whole repo."

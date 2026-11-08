@@ -4,7 +4,8 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { init } from "./init.ts";
 import { sarif } from "./sarif.ts";
-import { findSets, isDir, repoRoot, shown } from "./sets.ts";
+import { BadLock } from "./lock.ts";
+import { BadLaws, findSets, isDir, repoRoot, shown } from "./sets.ts";
 import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
 import { Claims, plan } from "./plan.ts";
@@ -75,6 +76,9 @@ async function main(argv: string[]): Promise<number> {
     console.error(`no VERDICT.md in ${repo}: create one (at the repo root, or in any directory) with one law per bullet`);
     return 2;
   }
+  for (const set of sets) {
+    if (set.laws.length === 0) console.error(`no laws in ${shown(repo, set.lawsFile)}: write one law per top-level bullet ("- Money is never a float."), then run \`verdict plan\``);
+  }
   const many = sets.length > 1;
   // One limit for everything, so VERDICT_JOBS bounds the whole run.
   const limit = makeLimit(jobs());
@@ -116,4 +120,21 @@ function usageError(message: string): number {
   return 2;
 }
 
-process.exit(await main(process.argv.slice(2)));
+// Anything that escapes main reaches a person: say what happened and what to
+// do, never a raw stack trace (VERDICT_DEBUG=1 shows it).
+async function run(): Promise<number> {
+  try {
+    return await main(process.argv.slice(2));
+  } catch (err) {
+    if (process.env.VERDICT_DEBUG) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof BadLock || err instanceof BadLaws) {
+      console.error(message);
+      return 2;
+    }
+    console.error(`verdict stopped: ${message}\nIf the message doesn't say how to fix it, run again with VERDICT_DEBUG=1 and report the output at https://github.com/pdrmtaheri/verdict/issues`);
+    return 1;
+  }
+}
+
+process.exit(await run());

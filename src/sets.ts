@@ -8,6 +8,8 @@ import { parseLaws, type Law } from "./laws.ts";
 import { readLock, type Lock } from "./lock.ts";
 import type { Where } from "./where.ts";
 
+export class BadLaws extends Error {}
+
 export interface LawSet extends Where {
   lawsFile: string;
   lockFile: string;
@@ -43,7 +45,13 @@ export async function findSets(cwd: string, paths: string[]): Promise<{ repo: st
   const sets = chosen.map((lawsFile) => {
     const dir = dirname(lawsFile);
     const lockFile = join(dir, "VERDICT.lock");
-    return { dir, repo, lawsFile, lockFile, laws: parseLaws(readFileSync(lawsFile, "utf8")), lock: readLock(lockFile) };
+    let text: string;
+    try {
+      text = readFileSync(lawsFile, "utf8");
+    } catch (err) {
+      throw new BadLaws(`can't read ${lawsFile} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}): check that it's a readable file, or remove it from the repo`);
+    }
+    return { dir, repo, lawsFile, lockFile, laws: parseLaws(text), lock: readLock(lockFile) };
   });
   return { repo, sets, unmatched };
 }
