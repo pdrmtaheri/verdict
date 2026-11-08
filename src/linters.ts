@@ -4,7 +4,8 @@
 // that rule's findings in the scope. The tool is inferred from the config's
 // file name. Turning the rule off is reported directly when the linter can
 // say so, and otherwise shows up when check replays the break.
-import { basename } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { ExecResult } from "./exec.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 
@@ -27,8 +28,9 @@ interface Linter {
   name: string;
   configs: RegExp;
   install: string;
-  // Whether the rule is on for this file under the config; null if it can't tell.
-  enabled: (ctx: LintContext, exe: string, file: string) => Promise<boolean | null>;
+  // The files in the scope the rule doesn't apply to under the config (turned
+  // off for them, or the files are ignored), with why; null if it can't tell.
+  off: (ctx: LintContext, exe: string, files: string[]) => Promise<string[] | null>;
   findings: (ctx: LintContext, exe: string, files: string[]) => Promise<{ found: Finding[]; suppressed: number } | Result>;
 }
 
@@ -40,20 +42,40 @@ const parse = (r: ExecResult): unknown => {
   }
 };
 
+const ESLINT_PROBE = `
+const [pkg, config, rule, ...files] = process.argv.slice(1);
+(async () => {
+  const { ESLint } = require(pkg);
+  const eslint = new ESLint({ cwd: process.cwd(), overrideConfigFile: config });
+  const off = [];
+  for (const f of files) {
+    if (await eslint.isPathIgnored(f)) { off.push(f + " (ignored by the config)"); continue; }
+    const c = await eslint.calculateConfigForFile(f);
+    const s = c && c.rules ? c.rules[rule] : undefined;
+    const level = Array.isArray(s) ? s[0] : s;
+    if (level === undefined || level === 0 || level === "off") off.push(f);
+  }
+  console.log(JSON.stringify(off));
+})().catch((e) => { console.error(e && e.message); process.exit(1); });
+`;
+
 const eslint: Linter = {
   name: "eslint",
   configs: /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.(c?js|json|ya?ml))?)$/,
   install: "add eslint to the project's dev dependencies",
-  async enabled(ctx, exe, file) {
-    const r = await ctx.run([exe, "--config", ctx.config, "--print-config", file]);
-    const cfg = r.code === 0 ? (parse(r) as { rules?: Record<string, unknown> } | null) : null;
-    if (!cfg?.rules) return null;
-    const setting = cfg.rules[ctx.rule];
-    const level = Array.isArray(setting) ? setting[0] : setting;
-    return level !== undefined && level !== 0 && level !== "off";
+  // One node process asks the project's own eslint, file by file, whether the
+  // file is ignored and what the rule is set to: a config can turn a rule off
+  // for some files only.
+  async off(ctx, exe, files) {
+    const node = ctx.bin("node");
+    if (!node) return null;
+    const pkg = dirname(dirname(realpathSync(exe))); // node_modules/eslint/bin/eslint.js
+    const r = await ctx.run([node, "-e", ESLINT_PROBE, "--", pkg, ctx.config, ctx.rule, ...files]);
+    const out = r.code === 0 ? parse(r) : null;
+    return Array.isArray(out) ? (out as string[]) : null;
   },
   async findings(ctx, exe, files) {
-    const r = await ctx.run([exe, "--config", ctx.config, "--format", "json", "--no-warn-ignored", ...files]);
+    const r = await ctx.run([exe, "--config", ctx.config, "--format", "json", "--no-warn-ignored", ...files.map((f) => `./${f}`)]);
     const out = parse(r) as { filePath: string; messages: { ruleId: string | null; line: number; message: string }[]; suppressedMessages?: { ruleId: string | null }[] }[] | null;
     if (!Array.isArray(out)) return inconclusive(`eslint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
     const found = out.flatMap((f) => f.messages.filter((m) => m.ruleId === ctx.rule).map((m) => ({ file: f.filePath, line: m.line, message: m.message })));
@@ -66,14 +88,24 @@ const ruff: Linter = {
   name: "ruff",
   configs: /^(\.?ruff\.toml|pyproject\.toml)$/,
   install: "install ruff (https://docs.astral.sh/ruff/installation/)",
-  async enabled(ctx, exe, file) {
-    const r = await ctx.run([exe, "check", "--config", ctx.config, "--show-settings", file]);
-    const m = /^linter\.rules\.enabled = \[\n([\s\S]*?)^\]/m.exec(r.stdout);
-    if (!m) return null;
-    return m[1]!.includes(`(${ctx.rule})`);
+  // Whether the rule is selected, then which files per-file-ignores exempt.
+  async off(ctx, exe, files) {
+    const r = await ctx.run([exe, "check", "--config", ctx.config, "--show-settings", `./${files[0]}`]);
+    const enabled = /^linter\.rules\.enabled = \[\n([\s\S]*?)^\]/m.exec(r.stdout);
+    if (!enabled) return null;
+    if (!enabled[1]!.includes(`(${ctx.rule})`)) return files;
+    const off: string[] = [];
+    const ignores = /^linter\.per_file_ignores = \{\n([\s\S]*?)^\}/m.exec(r.stdout)?.[1] ?? "";
+    for (const m of ignores.matchAll(/absolute_matcher = "([^"]+)"\s*\n\s*basename_matcher = "[^"]*"\s*\n\s*negated = (true|false)\s*\n\s*data = \[([\s\S]*?)\]/g)) {
+      if (!m[3]!.includes(`(${ctx.rule})`)) continue;
+      const glob = new Bun.Glob(m[1]!);
+      const root = realpathSync(ctx.root); // ruff prints resolved paths
+      for (const f of files) if (glob.match(join(root, f)) !== (m[2] === "true")) off.push(`${f} (per-file-ignores)`);
+    }
+    return off;
   },
   async findings(ctx, exe, files) {
-    const r = await ctx.run([exe, "check", "--config", ctx.config, "--output-format", "json", "--no-fix", "--exit-zero", ...files]);
+    const r = await ctx.run([exe, "check", "--config", ctx.config, "--output-format", "json", "--no-fix", "--exit-zero", ...files.map((f) => `./${f}`)]);
     const out = parse(r) as { code: string | null; filename: string; location: { row: number }; message: string }[] | null;
     if (!Array.isArray(out)) return inconclusive(`ruff exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
     // ruff doesn't report what `# noqa` suppressed.
@@ -105,8 +137,12 @@ export async function runLint(ctx: LintContext, warn: (w: string) => void): Prom
   if (!exe) return inconclusive(`${linter.name} is not installed: ${linter.install}, then run verdict check again`);
   const files = scopeFiles(ctx.root, ctx.scope);
   if (files.length === 0) return fail(`the scope "${ctx.scope}" matches no files, so ${ctx.rule} checks nothing: the code moved. Run \`verdict plan\` to re-plan the law`);
-  const on = await linter.enabled(ctx, exe, files[0]!);
-  if (on === false) return fail(`${ctx.rule} is turned off in ${ctx.config} for ${files[0]}: turn it back on, or edit the law in VERDICT.md if it no longer holds`);
+  const off = await linter.off(ctx, exe, files);
+  if (off === null) return inconclusive(`verdict couldn't ask ${linter.name} whether ${ctx.rule} is on for the scope, so a pass would prove nothing: check that ${linter.name} runs with ${ctx.config}`);
+  if (off.length > 0) {
+    const shown = off.slice(0, 10).join(", ") + (off.length > 10 ? `, and ${off.length - 10} more` : "");
+    return fail(`${ctx.rule} is turned off in ${ctx.config} for ${off.length === files.length ? "the whole scope" : `${off.length} of ${files.length} files in the scope`}: ${shown}. Turn it back on, or edit the law in VERDICT.md if it no longer holds`);
+  }
   const r = await linter.findings(ctx, exe, files);
   if ("status" in r) return r;
   if (r.suppressed > 0) warn(`${r.suppressed} finding${r.suppressed === 1 ? "" : "s"} of ${ctx.rule} suppressed by disable comments in the scope`);

@@ -36,7 +36,7 @@ test.skipIf(!hasEslint)("eslint: a rule turned off in the config fails the law",
   writeFileSync(join(root, "eslint.config.mjs"), ESLINT.replace('"error"', '"off"'));
   const r = await lint(root);
   expect(r.status).toBe("fail");
-  expect(r.details[0]!.result.message).toContain("no-var is turned off in eslint.config.mjs");
+  expect(r.details[0]!.result.message).toContain("no-var is turned off in eslint.config.mjs for the whole scope");
 });
 
 test.skipIf(!hasEslint)("eslint: disable comments are reported, and a scope that matches nothing fails", async () => {
@@ -89,5 +89,19 @@ test.skipIf(!hasRuff)("ruff: the rule's findings decide the law; a rule no longe
   writeFileSync(join(root, "pyproject.toml"), PYPROJECT.replace("E711", "F401"));
   const off = await lint(root, ruffE);
   expect(off.status).toBe("fail");
-  expect(off.details[0]!.result.message).toContain("E711 is turned off");
+  expect(off.details[0]!.result.message).toContain("E711 is turned off in pyproject.toml for the whole scope");
+});
+
+test.skipIf(!hasEslint)("eslint: a rule turned off for part of the scope fails the law", async () => {
+  const root = repo({ "eslint.config.mjs": ESLINT.replace("];", ', { files: ["src/legacy/**"], rules: { "no-var": "off" } }];'), "src/a.js": "let a;\n", "src/legacy/b.js": "var b;\n" });
+  const r = await lint(root);
+  expect(r.status).toBe("fail");
+  expect(r.details[0]!.result.message).toContain("for 1 of 2 files in the scope: src/legacy/b.js");
+});
+
+test.skipIf(!hasRuff)("ruff: per-file-ignores for the rule fail the law", async () => {
+  const root = repo({ "pyproject.toml": PYPROJECT + '[tool.ruff.lint.per-file-ignores]\n"app/legacy/*.py" = ["E711"]\n', "app/a.py": "x = 1\n", "app/legacy/b.py": "x = None\nif x == None:\n    pass\n" });
+  const r = await lint(root, ruffE);
+  expect(r.status).toBe("fail");
+  expect(r.details[0]!.result.message).toContain("app/legacy/b.py (per-file-ignores)");
 });
