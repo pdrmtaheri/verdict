@@ -3,8 +3,14 @@
     model provider; the rest of src/ goes through runAgent() or decisionModel().
   enforcers:
     - test: .verdict/src-provider-boundary.test.ts
+      scope: every .ts/.tsx/.js/.jsx/.mjs/.cjs/.mts/.cts file under src/ (symlinks
+        skipped) except src/agents/** and src/models.ts; static text scan for
+        agent/provider packages, ai SDK use, adapter imports, agent CLIs by
+        literal name, provider hosts, reads of provider key/base-URL env values
+        (bare presence tests exempt), network calls; tests and .verdict/ not
+        covered
       inputs:
-        .verdict/src-provider-boundary.test.ts: 40c57e6f6bd9
+        .verdict/src-provider-boundary.test.ts: 7fd7d4ecca2b
         bunfig.toml: e8acd4c297ca
 539d28d7:
   law: An agent's file tools never read or write outside the repository; the
@@ -42,9 +48,14 @@
 a3b28a29:
   law: Error messages tell the user what to do next.
   enforcers:
+    - test: .verdict/error-next-step-cli.test.ts
+      inputs:
+        .verdict/error-next-step-cli.test.ts: fc57d1195171
+        bunfig.toml: e8acd4c297ca
     - llm: .verdict/error-messages-next-step.judge.md
       inputs:
-        .verdict/error-messages-next-step.judge.md: 36ec6e1ec239
+        .verdict/error-messages-next-step.judge.md: 3318db218d4d
+        .verdict/error-next-step-cli.test.ts: fc57d1195171
 f25eb789:
   law: "Once the planner's submission is accepted, nothing the agent does
     afterwards changes the plan: no later or concurrent submit is validated or
