@@ -193,7 +193,8 @@ export function writeTools(root: string, outDir: string) {
         else if (!RUNNABLE.has(bin)) throw new Error(`${bin} is not allowed`);
         else if (!Bun.which(bin)) return `${bin} is not installed`;
         const r = await withScratch(root, async (dir) => {
-          const box = sandboxed(argv, { readable: [dir, root], writable: [dir], network: false }, dir);
+          const jar = process.env.VERDICT_TLA2TOOLS; // TLC, when the planner runs it through java
+          const box = sandboxed(argv, { readable: [dir, root, ...(jar ? [jar] : [])], writable: [dir], network: false }, dir);
           return exec(box.argv, { cwd: dir, env: box.env, cleanEnv: true, timeoutMs: 5 * 60_000 });
         });
         const broken = r.code !== 0 ? sandboxFailure(r.output) : null;

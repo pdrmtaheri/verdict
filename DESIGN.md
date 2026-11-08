@@ -124,6 +124,20 @@ Every enforcer file states its scope: a `scope:` line near the top (a `scope`
 field in JSON), saying what it covers, its bounds and assumptions, and what it
 leaves out. A pass covers that scope, not the system.
 
+### Binding a spec to its code
+
+A TLA+ spec checks a design, and no edit to the code can make TLC fail, so by
+itself it could never be seen to fail on a break. A spec therefore names the
+files it models, one comment line each (`\* models: src/controller.js`), and
+verdict stamps each file's hash into that line. If a modeled file changes, the
+spec fails as stale ("the code this spec models changed"), the way an edited law
+is unplanned until `verdict plan`. That makes a break to the modeled code a
+valid break for the spec. A spec is always submitted with a test that replays it
+against the real code; the test says whether the code still conforms, the hash
+says the spec was read against this code. `verdict plan` re-stamps a stale spec
+when its replay tests still pass, with no model call, and re-plans the law when
+they fail, so the planner can sort whether the code or the spec moved.
+
 ## Enforcer kinds
 
 All four observe from outside.
