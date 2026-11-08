@@ -1,7 +1,7 @@
 [
   {
     "enforcer": ".verdict/submit-first-wins.test.ts",
-    "description": "Remove the `if (submitted)` guard in runAgent's submit so later submits are validated and can replace the accepted plan.",
+    "description": "Remove the `if (submitted) return \"already accepted…\"` guard in runAgent's submit, so later submits are validated and can replace the accepted plan.",
     "edits": [
       {
         "path": "src/agent.ts",
@@ -11,35 +11,24 @@
     ]
   },
   {
-    "enforcer": ".verdict/submit-first-wins.test.ts",
-    "description": "Stop serialising submits through `queue`, so concurrent submits are validated at the same time.",
-    "edits": [
-      {
-        "path": "src/agent.ts",
-        "find": "      const handled = queue.then(async () => {",
-        "replace": "      const handled = Promise.resolve().then(async () => {"
-      }
-    ]
-  },
-  {
     "enforcer": ".verdict/submit-schedules.test.ts",
-    "description": "Stop serialising submits through `queue`, so concurrent submits are validated at the same time.",
-    "edits": [
-      {
-        "path": "src/agent.ts",
-        "find": "      const handled = queue.then(async () => {",
-        "replace": "      const handled = Promise.resolve().then(async () => {"
-      }
-    ]
-  },
-  {
-    "enforcer": ".verdict/submit-schedules.test.ts",
-    "description": "Remove the `if (submitted)` guard in runAgent's submit so later submits are validated again.",
+    "description": "Remove the `if (submitted) return \"already accepted…\"` guard in runAgent's submit, so submits after acceptance are validated.",
     "edits": [
       {
         "path": "src/agent.ts",
         "find": "        if (submitted) return \"already accepted. You are done; stop here.\";\n",
         "replace": ""
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/submit-agent-throws.test.ts",
+    "description": "In runAgent, rethrow the agent's failure before returning the accepted submission, as it did before 9c61b29, so a throw after acceptance loses the plan.",
+    "edits": [
+      {
+        "path": "src/agent.ts",
+        "find": "  if (submitted) return submitted;\n  if (failure) throw failure;",
+        "replace": "  if (failure) throw failure;\n  if (submitted) return submitted;"
       }
     ]
   }

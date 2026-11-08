@@ -1,4 +1,4 @@
-// scope: the planner's write paths, called the way the planner calls them, in throwaway git repos with a directory outside each repo that every escape targets. write_file and run's script check from writeTools() in src/tools.ts (absolute, ../ and symlink paths, files outside .verdict/); runInScratch() in src/breaks.ts (what run_enforcer and validate use) and prove() (what try_break uses): a planner-written test file and decision file that write into the real repo by absolute path and by relative path, and edits whose paths escape the repo or point into .verdict/ -- the real repo outside .verdict/ and the directory beside it must stay byte-identical, while a relative write must land in the scratch copy. Run with VERDICT_SANDBOX=off because the OS sandbox cannot nest (macOS) inside verdict's own: so this checks WHERE verdict runs things (always a scratch copy, never the repo) and which files its edit/write tools accept, not the OS sandbox's write denial; absolute-path writes by run programs and the Box passed to sandboxed() are covered by the judge in planner-sandbox.judge.md. Not covered: reads by run, tla and semgrep (argv fixed by verdict), the network, the agents' built-in tools (agent-builtin-tools.judge.md).
+// scope: the planner's write paths, called the way the planner calls them, in throwaway git repos with a directory outside each repo that every escape targets. write_file and run's script check from writeTools() in src/tools.ts (absolute, ../ and symlink paths, files outside .verdict/); runInScratch() in src/breaks.ts (what run_enforcer and validate use) and prove() (what try_break uses): a planner-written test file and decision file that write into the real repo by absolute path and by relative path, and edits whose paths escape the repo or point into .verdict/ -- the real repo outside .verdict/ and the directory beside it must stay byte-identical, while a relative write must land in the scratch copy. Run with VERDICT_SANDBOX=off because the OS sandbox cannot nest (macOS) inside verdict's own: so this checks WHERE verdict runs things (always a scratch copy, never the repo) and which files its edit/write tools accept, not the OS sandbox's write denial; absolute-path writes by run programs and the Box passed to sandboxed() are covered by the judge in planner-sandbox.judge.md. Not covered: reads by run, tla and semgrep (argv fixed by verdict), the network, the agents' built-in tools (agent-builtin-tools.judge.md). The try_break test's repo has no dangling symlink in .verdict/ (the write_file test keeps one): src/pins.ts helpersOf() stats every file there and throws on a dangling link, which is a crash, not an escape.
 
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ const { writeTools } = await import("../src/tools.ts");
 const SECRET = "VERDICT-SECRET-41d9";
 const LAW = "An agent's file tools never read or write outside the repository; the planner never writes to the repository outside .verdict/, and anything it runs can write only to a scratch copy.";
 
-async function fixture() {
+async function fixture(opts: { danglingLink?: boolean } = {}) {
   const base = mkdtempSync(join(tmpdir(), "verdict-planner-"));
   const outside = join(base, "outside");
   const root = join(base, "repo");
@@ -28,7 +28,7 @@ async function fixture() {
   writeFileSync(join(root, "a.txt"), "inside\n");
   writeFileSync(join(root, "src", "code.ts"), "export const x = 1;\n");
   symlinkSync(outside, join(verdict, "dir-link"));
-  symlinkSync(join(outside, "dangling.txt"), join(verdict, "dangling-link"));
+  if (opts.danglingLink !== false) symlinkSync(join(outside, "dangling.txt"), join(verdict, "dangling-link"));
   await exec(["git", "init", "-q"], { cwd: root });
   await exec(["git", "add", "-A"], { cwd: root });
   await exec(["git", "-c", "user.name=verdict", "-c", "user.email=verdict@example.invalid", "commit", "-qm", "init"], { cwd: root });
@@ -126,7 +126,7 @@ test("a planner-written test or decision file, run through runInScratch, runs in
 });
 
 test("try_break edits change only the scratch copy: escaping paths are refused", async () => {
-  const f = await fixture();
+  const f = await fixture({ danglingLink: false });
   try {
     const tools = writeTools(f.root, f.verdict, f.root);
     await callTool(tools.write_file, { path: ".verdict/ok.test.ts", content: `// scope: probe\nimport { test } from "bun:test";\ntest("p", () => {});\n` });

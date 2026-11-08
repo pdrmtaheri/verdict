@@ -5,8 +5,8 @@
     "edits": [
       {
         "path": "src/plan.ts",
-        "find": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\") return;",
-        "replace": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\" && r.outcome !== \"in sync\") return;"
+        "find": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\") {\n          // Nothing to re-plan",
+        "replace": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\" && r.outcome !== \"in sync\") {\n          // Nothing to re-plan"
       }
     ]
   }
