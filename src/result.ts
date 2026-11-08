@@ -3,6 +3,7 @@ export type Status = "pass" | "fail" | "inconclusive";
 export interface Result {
   status: Status;
   message: string;
+  warnings?: string[]; // changes the enforcer noticed that don't decide its status
 }
 
 export const pass = (message = ""): Result => ({ status: "pass", message });

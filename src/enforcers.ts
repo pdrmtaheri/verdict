@@ -10,6 +10,7 @@ import { sandboxed, sandboxFailure, SandboxUnavailable } from "./sandbox.ts";
 import { decisionModel } from "./models.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { readTools } from "./tools.ts";
+import { runLint } from "./linters.ts";
 
 export interface Context {
   root: string; // the law's directory: enforcers run here
@@ -17,6 +18,8 @@ export interface Context {
   law: string;
   path: string; // enforcer file, relative to root
   name?: string; // the one test to run, in a file that has others
+  rule?: string; // lint: the rule in the project's config (path is the config)
+  scope?: string; // lint: the files the rule must hold for
   // Set while planning: root is a scratch copy, and every program runs in the
   // OS sandbox, writing only to root. `readable` is what else it may read.
   sandbox?: { readable: string[] };
@@ -154,6 +157,20 @@ const test: Runner = async (ctx) => {
 
 export const SKIPPED = 77;
 
+// ---------------------------------------------------------------- lint
+// A rule the project's own linter has (see linters.ts).
+
+const lint: Runner = async (ctx) => {
+  const { root, path, rule, scope } = ctx;
+  if (!rule || !scope) return fail(`the lint enforcer ${path} needs a rule and a scope in VERDICT.lock: run \`verdict plan\` to re-plan the law`);
+  const warnings: string[] = [];
+  const r = await runLint(
+    { root, config: path, rule, scope, run: (argv) => run(ctx, argv), bin: (name) => findBin(root, name, ctx.repo ?? root) },
+    (w) => warnings.push(w),
+  );
+  return warnings.length ? { ...r, warnings } : r;
+};
+
 // ---------------------------------------------------------------- TLA+
 // TLC exit codes: 0 ok, 10-14 a property was violated, others are errors.
 
@@ -265,6 +282,7 @@ export function scopeOf(root: string, path: string): string | null {
 
 export const RUNNERS: Record<string, Runner> = {
   semgrep,
+  lint,
   test,
   tla,
   decision,

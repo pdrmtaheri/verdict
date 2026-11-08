@@ -9,6 +9,7 @@ import type { Law } from "./laws.ts";
 import { writeLock, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
 import { inputsOf } from "./pins.ts";
+import { LINTERS, linterFor, scopeFiles } from "./linters.ts";
 import { reproveLaw, type Reproof } from "./reprove.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
 import { label, type Where } from "./where.ts";
@@ -88,6 +89,14 @@ Enforcer kinds (the "kind" in submit) and their file formats
      typescript-eslint rule, ...), written inside ${OUT_DIR}/ and run by a test
      script.
   4. A behavioural test or an LLM judge.
+- lint: a rule the project's own linter already has (${"eslint, ruff"}). path is
+  the linter's config file (eslint.config.js, .eslintrc.*, ruff.toml,
+  pyproject.toml), rule is the rule's id, and scope is globs relative to the
+  law's directory (e.g. "src/**/*.ts"). verdict runs the linter under that
+  config and keeps that rule's findings in the scope. Use it instead of a
+  semgrep rule when the project's linter already checks the law; never write
+  linter rules or configs of your own. Its break is code that violates the
+  rule.
 - test: one test file, run with the repo's test framework. The runner is
   inferred from the file name: *.test.ts / *.spec.ts (vitest, jest, playwright
   for .spec with @playwright/test, else bun test), *_test.go (go test on its
@@ -132,6 +141,7 @@ const EnforcerRef = z.object({
   kind: z.enum(KINDS as [string, ...string[]]),
   path: z.string().describe(`A file you wrote in ${OUT_DIR}/, or a test file the repo already has`),
   name: z.string().optional().describe("For a test file the repo already has: the one test that enforces the law, by its name"),
+  rule: z.string().optional().describe("For lint: the rule's id in the project's linter config (path is that config file)"),
   scope: z.string().optional().describe(`What it covers. Required for a file outside ${OUT_DIR}/ (you can't add a scope line there)`),
 });
 
@@ -179,9 +189,14 @@ export async function validate(w: Where, law: Law, sub: Submission): Promise<{ p
       } catch (err) {
         return { problem: (err as Error).message, notes };
       }
-      if (e.kind !== "test") return { problem: `${e.path} is outside ${OUT_DIR}/: only a test the repo already has can be used where it is; write a ${e.kind} enforcer in ${OUT_DIR}/`, notes };
+      if (e.kind !== "test" && e.kind !== "lint") return { problem: `${e.path} is outside ${OUT_DIR}/: only a test or a linter config the repo already has can be used where it is; write a ${e.kind} enforcer in ${OUT_DIR}/`, notes };
       if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} doesn't exist`, notes };
       if (!e.scope) return { problem: `${e.path} is the repo's own file: give its scope in the submission`, notes };
+      if (e.kind === "lint" && !linterFor(e.path)) return { problem: `${e.path} isn't a config file verdict can read for lint (${LINTERS.map((l) => l.name).join(", ")}); for another linter, write an executable test in ${OUT_DIR}/ that runs it`, notes };
+      if (e.kind === "lint" && !e.rule) return { problem: `the lint enforcer ${e.path} needs the rule's id`, notes };
+      if (e.kind === "lint" && scopeFiles(w.dir, e.scope).length === 0) return { problem: `the scope "${e.scope}" matches no files: for lint it is globs relative to the law's directory`, notes };
+    } else if (e.kind === "lint") {
+      return { problem: `a lint enforcer points at the project's own linter config, not a file in ${OUT_DIR}/; to write a rule of your own, use semgrep`, notes };
     } else {
       if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
       if (!e.scope && !scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };

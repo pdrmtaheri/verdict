@@ -1,6 +1,7 @@
 // VERDICT.lock: law hash -> { law, enforcers: [{ <kind>: <path>, ... }] }.
 // Besides its kind and path, an enforcer may record:
 //   name    the test to run in a file that has others (tests outside .verdict/)
+//   rule    for a lint enforcer, the rule in the project's linter config
 //   scope   what it covers, when the file can't say (files verdict doesn't own)
 //   inputs  what it was proven against: a fingerprint of the enforcer file and
 //           of the config it runs under (see pins.ts). When they differ, check
@@ -14,6 +15,7 @@ export interface Enforcer {
   kind: string;
   path: string;
   name?: string;
+  rule?: string;
   scope?: string;
   inputs?: Inputs;
 }
@@ -25,7 +27,7 @@ export interface LockEntry {
 
 export type Lock = Map<string, LockEntry>;
 
-const FIELDS = ["name", "scope", "inputs"];
+const FIELDS = ["name", "rule", "scope", "inputs"];
 
 export function readLock(file: string): Lock {
   const lock: Lock = new Map();
@@ -40,6 +42,7 @@ export function readLock(file: string): Lock {
       if (!kind) return [];
       const out: Enforcer = { kind, path: String(e[kind]) };
       if (typeof e.name === "string") out.name = e.name;
+      if (typeof e.rule === "string") out.rule = e.rule;
       if (typeof e.scope === "string") out.scope = e.scope;
       if (e.inputs && typeof e.inputs === "object") {
         out.inputs = Object.fromEntries(Object.entries(e.inputs).map(([k, v]) => [k, String(v)]));
@@ -63,6 +66,7 @@ export function writeLock(file: string, lock: Lock, laws: Law[]): void {
       enforcers: entry.enforcers.map((e) => ({
         [e.kind]: e.path,
         ...(e.name ? { name: e.name } : {}),
+        ...(e.rule ? { rule: e.rule } : {}),
         ...(e.scope ? { scope: e.scope } : {}),
         ...(e.inputs ? { inputs: e.inputs } : {}),
       })),

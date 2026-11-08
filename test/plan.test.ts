@@ -69,7 +69,7 @@ test("a law that is false today needs a finding, not a weaker enforcer", async (
 test("outside .verdict/, plan accepts only a test the repo already has, with its scope", async () => {
   const root = repo({ "src/x.test.ts": "", "src/rule.yml": "rules: []\n" });
   const cases = [
-    [{ kind: "semgrep", path: "src/rule.yml", scope: "src/" }, "only a test the repo already has"],
+    [{ kind: "semgrep", path: "src/rule.yml", scope: "src/" }, "only a test or a linter config the repo already has"],
     [{ kind: "test", path: "src/x.test.ts" }, "give its scope"],
     [{ kind: "test", path: "src/missing.test.ts", scope: "src/" }, "doesn't exist"],
     [{ kind: "test", path: "../elsewhere.test.ts", scope: "src/" }, "outside"],

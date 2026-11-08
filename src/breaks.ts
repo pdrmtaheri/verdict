@@ -57,7 +57,7 @@ export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Brea
       } catch (err) {
         return { kind: "stale", reason: (err as Error).message };
       }
-      if (relative(dir, file).split(sep)[0] === ".verdict" || pinned.has(same(file))) {
+      if (testSide(relative(c.repo, file)) || pinned.has(same(file))) {
         return { kind: "stale", reason: `${e.path}: a break must change the system, not the enforcer or the config it runs under` };
       }
       if (!existsSync(file)) return { kind: "stale", reason: `${e.path} no longer exists` };
@@ -66,11 +66,21 @@ export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Brea
       if (count !== 1) return { kind: "stale", reason: `${e.path}: the text to replace occurs ${count} times, not once` };
       writeFileSync(file, text.replace(e.find, () => e.replace));
     }
-    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, sandbox: { readable: [w.repo] } });
+    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, rule: enforcer.rule, scope: enforcer.scope, sandbox: { readable: [w.repo] } });
     if (result.status === "fail") return { kind: "caught", result };
     if (result.status === "pass") return { kind: "missed", result };
     return { kind: "unknown", result };
   });
+}
+
+// Files on the test side of the repo, which a break may not edit: making a
+// test fail by changing its fixtures, snapshots, helpers or another law's
+// enforcers proves nothing about the system. Path relative to the repo root.
+export function testSide(path: string): boolean {
+  const parts = path.toLowerCase().split(sep); // stricter than any runner, on any filesystem
+  const name = parts.at(-1) ?? "";
+  if (parts.some((p) => [".verdict", "__snapshots__", "__fixtures__", "__mocks__", "fixtures", "testdata", "__tests__"].includes(p))) return true;
+  return /\.(test|spec)\.[^/]+$|_test\.go$|^test_.*\.py$|_test\.py$|^conftest\.py$/.test(name);
 }
 
 // One spelling per file, to compare paths: symlinks resolved, and case folded
@@ -102,7 +112,7 @@ export function stale(w: Where, brk: Break): string | null {
 export async function runInScratch(w: Where, law: string, enforcer: Enforcer): Promise<Result> {
   return withScratch(w.repo, (copy) => {
     const c = inCopy(w, copy);
-    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, sandbox: { readable: [w.repo] } });
+    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, rule: enforcer.rule, scope: enforcer.scope, sandbox: { readable: [w.repo] } });
   });
 }
 
