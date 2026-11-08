@@ -2,23 +2,25 @@
 // enforcer fail: removing a check, reordering a step, changing a value.
 // "A check you've never seen fail proves nothing." Breaks ship with the
 // enforcers, in .verdict/breaks/<law hash>.json, and `verdict plan` replays them.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { runEnforcer } from "./enforcers.ts";
-import type { Enforcer } from "./lock.ts";
+import { enforcerId, type Enforcer } from "./lock.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { withScratch } from "./scratch.ts";
+import { pinnedFiles } from "./pins.ts";
 import { inside } from "./tools.ts";
+import { inCopy, type Where } from "./where.ts";
 
 export const Edit = z.object({
-  path: z.string().describe("A file of the system under check, relative to the repo root"),
+  path: z.string().describe("A file of the system under check, relative to the law's directory (../ reaches the rest of the repo)"),
   find: z.string().describe("Exact text that occurs once in the file"),
   replace: z.string(),
 });
 
 export const Break = z.object({
-  enforcer: z.string().describe("Path of the enforcer this break must make fail"),
+  enforcer: z.string().describe('The enforcer this break must make fail: its path, plus "#<rule>" for a lint enforcer or "#<name>" for a named test'),
   description: z.string().describe("What the break does, in the code's own words"),
   edits: z.array(Edit).min(1),
 });
@@ -42,34 +44,82 @@ export type Proof =
   | { kind: "stale"; reason: string } // the break no longer applies: the code moved
   | { kind: "unknown"; result: Result }; // the enforcer was inconclusive
 
+// The break for this enforcer: by its id, or, for a break recorded before ids
+// had a rule or name, by its path when no other enforcer shares the path.
+export function breakFor(breaks: Break[], e: Enforcer, all: Enforcer[] = [e]): Break | undefined {
+  return breaks.find((b) => b.enforcer === enforcerId(e)) ?? (all.filter((o) => o.path === e.path).length === 1 ? breaks.find((b) => b.enforcer === e.path) : undefined);
+}
+
 // Applies the break to a scratch copy and runs the enforcer there.
-export async function prove(root: string, law: string, enforcer: Enforcer, brk: Break): Promise<Proof> {
-  return withScratch(root, async (dir) => {
+export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Break): Promise<Proof> {
+  return withScratch(w.repo, async (copy) => {
+    const c = inCopy(w, copy);
+    const dir = c.dir;
+    const pinned = new Set(pinnedFiles(c, enforcer).map((f) => same(resolve(dir, f))));
     for (const e of brk.edits) {
       let file: string;
       try {
-        file = inside(dir, e.path);
+        file = inside(dir, e.path, c.repo);
       } catch (err) {
         return { kind: "stale", reason: (err as Error).message };
       }
-      if (relative(dir, file).split(sep)[0] === ".verdict") return { kind: "stale", reason: `${e.path}: a break must change the system, not the enforcer` };
+      if (testSide(relative(c.repo, file)) || pinned.has(same(file))) {
+        return { kind: "stale", reason: `${e.path}: a break must change the system, not the enforcer or the config it runs under` };
+      }
       if (!existsSync(file)) return { kind: "stale", reason: `${e.path} no longer exists` };
       const text = readFileSync(file, "utf8");
       const count = text.split(e.find).length - 1;
       if (count !== 1) return { kind: "stale", reason: `${e.path}: the text to replace occurs ${count} times, not once` };
       writeFileSync(file, text.replace(e.find, () => e.replace));
     }
-    const result = await runEnforcer(enforcer.kind, { root: dir, law, path: enforcer.path, sandbox: { readable: [root] } });
+    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, rule: enforcer.rule, scope: enforcer.scope, sandbox: { readable: [w.repo] } });
     if (result.status === "fail") return { kind: "caught", result };
     if (result.status === "pass") return { kind: "missed", result };
     return { kind: "unknown", result };
   });
 }
 
+// Files on the test side of the repo, which a break may not edit: making a
+// test fail by changing its fixtures, snapshots, helpers or another law's
+// enforcers proves nothing about the system. Path relative to the repo root.
+export function testSide(path: string): boolean {
+  const parts = path.toLowerCase().split(sep); // stricter than any runner, on any filesystem
+  const name = parts.at(-1) ?? "";
+  if (parts.some((p) => [".verdict", "__snapshots__", "__fixtures__", "__mocks__", "fixtures", "testdata", "__tests__"].includes(p))) return true;
+  return /\.(test|spec)\.[^/]+$|_test\.go$|^test_.*\.py$|_test\.py$|^conftest\.py$/.test(name);
+}
+
+// One spelling per file, to compare paths: symlinks resolved, and case folded
+// where the filesystem ignores case (macOS and Windows by default).
+function same(p: string): string {
+  const real = existsSync(p) ? realpathSync(p) : p;
+  return process.platform === "darwin" || process.platform === "win32" ? real.toLowerCase() : real;
+}
+
+// Whether a break still applies to the code, without running anything: each
+// edit's text must still occur exactly once. Returns why not, or null.
+export function stale(w: Where, brk: Break): string | null {
+  for (const e of brk.edits) {
+    let file: string;
+    try {
+      file = inside(w.dir, e.path, w.repo);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    if (!existsSync(file)) return `${e.path} no longer exists`;
+    const count = readFileSync(file, "utf8").split(e.find).length - 1;
+    if (count !== 1) return `${e.path}: the text it replaces occurs ${count} times, not once`;
+  }
+  return null;
+}
+
 // Runs an enforcer the way planning does: on a scratch copy, in the sandbox.
 // The planner wrote it, so it never runs against the real repo unconfined.
-export async function runInScratch(root: string, law: string, enforcer: Enforcer): Promise<Result> {
-  return withScratch(root, (dir) => runEnforcer(enforcer.kind, { root: dir, law, path: enforcer.path, sandbox: { readable: [root] } }));
+export async function runInScratch(w: Where, law: string, enforcer: Enforcer): Promise<Result> {
+  return withScratch(w.repo, (copy) => {
+    const c = inCopy(w, copy);
+    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, name: enforcer.name, rule: enforcer.rule, scope: enforcer.scope, sandbox: { readable: [w.repo] } });
+  });
 }
 
 export function describe(p: Proof): Result {

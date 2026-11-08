@@ -7,6 +7,7 @@ import { validate } from "../src/plan.ts";
 import { refreshSpecs, reproveLaw } from "../src/reprove.ts";
 import { hashFile, isStale, modelsOf, staleReason, stampModels } from "../src/specbind.ts";
 import type { Lock } from "../src/lock.ts";
+import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
 
 const SPEC = "---- MODULE m ----\n\\* scope: the phase table\n\\* models: src/code.js\n====\n";
@@ -60,25 +61,25 @@ test("plan re-stamps a stale spec when its replay test still passes, and leaves 
   const l = lock([{ kind: "tla", path: ".verdict/m.tla" }, { kind: "test", path: ".verdict/replay.sh" }]);
   const log: string[] = [];
   writeFileSync(join(root, "src/code.js"), "const x = 99;\n"); // harmless edit: the test still passes
-  await refreshSpecs(root, law, l, (s) => log.push(s));
+  await refreshSpecs(at(root), law, l, (s) => log.push(s));
   expect(staleReason(root, ".verdict/m.tla")).toBeNull();
   expect(log.join("\n")).toContain("re-stamped");
 
   writeFileSync(join(root, "src/code.js"), "const y = 1;\n"); // the replay test now fails
-  await refreshSpecs(root, law, l, () => {});
+  await refreshSpecs(at(root), law, l, () => {});
   expect(isStale(staleReason(root, ".verdict/m.tla")!)).toBe(true);
-  const r = await reproveLaw(root, law, l);
+  const r = await reproveLaw(at(root), law, l);
   expect(r.outcome).toBe("drift"); // reported as drift to re-plan, not as a failing law
 });
 
 test("planning rejects a spec with no models line, or with no test beside it", async () => {
   const root = repo(files({ ".verdict/bare.tla": "\\* scope: x\n", ".verdict/t.sh": "#!/bin/sh\nexit 0\n" }), [".verdict/t.sh"]);
-  const noModels = await validate(root, law, { enforcers: [{ kind: "tla", path: ".verdict/bare.tla" }, { kind: "test", path: ".verdict/t.sh" }], breaks: [], suggestions: [] });
+  const noModels = await validate(at(root), law, { enforcers: [{ kind: "tla", path: ".verdict/bare.tla" }, { kind: "test", path: ".verdict/t.sh" }], breaks: [], suggestions: [] });
   expect(noModels.problem).toContain("must name the code it models");
-  const alone = await validate(root, law, { enforcers: [{ kind: "tla", path: ".verdict/m.tla" }], breaks: [], suggestions: [] });
+  const alone = await validate(at(root), law, { enforcers: [{ kind: "tla", path: ".verdict/m.tla" }], breaks: [], suggestions: [] });
   expect(alone.problem).toContain("replays");
   const missing = repo(files({ ".verdict/m.tla": SPEC.replace("src/code.js", "src/gone.js"), ".verdict/t.sh": "#!/bin/sh\nexit 0\n" }), [".verdict/t.sh"]);
-  const gone = await validate(missing, law, { enforcers: [{ kind: "tla", path: ".verdict/m.tla" }, { kind: "test", path: ".verdict/t.sh" }], breaks: [], suggestions: [] });
+  const gone = await validate(at(missing), law, { enforcers: [{ kind: "tla", path: ".verdict/m.tla" }, { kind: "test", path: ".verdict/t.sh" }], breaks: [], suggestions: [] });
   expect(gone.problem).toContain("not a file of the system under check");
 });
 

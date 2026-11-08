@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/rewrap-hash.test.ts",
+    "description": "Hash the raw joined law lines instead of the whitespace-normalised text, so re-wrapping or re-indenting changes the hash",
+    "edits": [
+      {
+        "path": "src/laws.ts",
+        "find": "    const text = normalise(lines.join(\" \"));\n    return { text, hash: hashLaw(text) };",
+        "replace": "    const raw = lines.join(\"\\n\");\n    return { text: normalise(raw), hash: new Bun.CryptoHasher(\"sha256\").update(raw).digest(\"hex\").slice(0, 8) };"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/rewrap-hash.test.ts",
+    "description": "Hash ignores the last word of a law (and case), so some word changes keep the law planned",
+    "edits": [
+      {
+        "path": "src/laws.ts",
+        "find": ".update(normalise(text))",
+        "replace": ".update(normalise(text).toLowerCase().replace(/\\s\\S+$/, \"\"))"
+      }
+    ]
+  }
+]

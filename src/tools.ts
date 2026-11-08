@@ -1,7 +1,7 @@
 // Tools that agents (the LLM judge and the planner) use to look at the repo.
 // Every path is confined to the repo root.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { defineTool } from "./agent.ts";
 import { exec, tail } from "./exec.ts";
@@ -69,7 +69,7 @@ const GIT_FLAGS: Record<string, string[]> = {
 // argument, so skipping it would let an unchecked flag through.
 const TAKES_VALUE = new Set(["-n", "-L"]);
 
-export function checkGitArgs(root: string, args: string[]): void {
+export function checkGitArgs(root: string, args: string[], repo = root): void {
   const [sub, ...rest] = args;
   const flags = GIT_FLAGS[sub ?? ""];
   if (!flags) throw new Error(`git ${sub} is not allowed; use one of ${Object.keys(GIT_FLAGS).join(", ")}`);
@@ -84,26 +84,40 @@ export function checkGitArgs(root: string, args: string[]): void {
         i++; // git always takes the next argument as its value
       }
     } else if (lexists(resolve(root, a))) {
-      inside(root, a); // a path: must stay in the repo
+      inside(root, a, repo); // a path: must stay in the repo
     }
   }
 }
 
-export function readTools(root: string) {
+// `root` is the law's directory: paths are relative to it, and ../ reaches
+// the rest of the repo, up to `repo` and no further.
+// Files under `from` (relative to root, default root itself, confined to
+// repo), with paths relative to root.
+async function filesFrom(root: string, repo: string, from = "."): Promise<string[]> {
+  const base = inside(root, from, repo);
+  return (await gitFiles(base)).map((f) => relative(root, join(base, f)) || f);
+}
+
+export function readTools(root: string, repo = root) {
   return {
     read_file: defineTool({
       description: "Read a text file in the repository.",
-      schema: z.object({ path: z.string().describe("Path relative to the repo root") }),
+      schema: z.object({ path: z.string().describe("Path relative to the law's directory; ../ reaches the rest of the repo") }),
       execute: async ({ path }) => {
-        const text = readFileSync(inside(root, path), "utf8");
+        const text = readFileSync(inside(root, path, repo), "utf8");
         return text.length > MAX_READ ? text.slice(0, MAX_READ) + "\n…(truncated)" : text;
       },
     }),
     list_files: defineTool({
-      description: "List files tracked in the repository (respects .gitignore). Optional glob filter.",
-      schema: z.object({ glob: z.string().optional().describe('e.g. "src/**/*.ts"') }),
-      execute: async ({ glob }) => {
-        let files = await gitFiles(root);
+      description:
+        "List files tracked in git (respects .gitignore) under the law's directory, or under `from` " +
+        "(e.g. \"..\" for the parent; never above the repo root). Paths are relative to the law's directory. Optional glob filter.",
+      schema: z.object({
+        glob: z.string().optional().describe('e.g. "src/**/*.ts", matched against the listed paths'),
+        from: z.string().optional().describe('Directory to list, relative to the law\'s directory. Default "."'),
+      }),
+      execute: async ({ glob, from }) => {
+        let files = await filesFrom(root, repo, from);
         if (glob) {
           const g = new Bun.Glob(glob);
           files = files.filter((f) => g.match(f));
@@ -112,20 +126,23 @@ export function readTools(root: string) {
       },
     }),
     grep: defineTool({
-      description: "Search file contents with a regular expression. Returns path:line: text.",
+      description:
+        "Search file contents with a regular expression, under the law's directory or under `from`. " +
+        "Returns path:line: text, paths relative to the law's directory.",
       schema: z.object({
         pattern: z.string(),
         glob: z.string().optional().describe("Only search files matching this glob"),
+        from: z.string().optional().describe('Directory to search, relative to the law\'s directory. Default "."'),
       }),
-      execute: async ({ pattern, glob }) => {
+      execute: async ({ pattern, glob, from }) => {
         const re = new RegExp(pattern);
         const g = glob ? new Bun.Glob(glob) : null;
         const hits: string[] = [];
-        for (const f of await gitFiles(root)) {
+        for (const f of await filesFrom(root, repo, from)) {
           if (g && !g.match(f)) continue;
           let text: string;
           try {
-            const abs = inside(root, f); // a tracked symlink may point outside the repo
+            const abs = inside(root, f, repo); // a tracked symlink may point outside the repo
             if (statSync(abs).size > 1_000_000) continue;
             text = readFileSync(abs, "utf8");
           } catch {
@@ -143,7 +160,7 @@ export function readTools(root: string) {
       description: `Run a read-only git command: ${Object.keys(GIT_FLAGS).join(", ")}, with common flags.`,
       schema: z.object({ args: z.array(z.string()).describe('e.g. ["diff", "--cached"]') }),
       execute: async ({ args }) => {
-        checkGitArgs(root, args);
+        checkGitArgs(root, args, repo);
         const [sub, ...rest] = args;
         const safe = sub === "diff" || sub === "log" || sub === "show" ? ["--no-ext-diff", "--no-textconv"] : [];
         const r = await exec(["git", "--no-pager", sub!, ...safe, ...rest], {
@@ -158,11 +175,13 @@ export function readTools(root: string) {
 
 // Programs the planner may run to validate what it generated. No shell.
 const RUNNABLE = new Set([
-  "semgrep", "eslint", "ruff", "golangci-lint", "mypy", "pyright",
+  "semgrep", "eslint", "oxlint", "ruff", "golangci-lint", "mypy", "pyright",
   "tlc", "java", "bun", "npx", "go", "python", "python3", "pytest", "cargo",
 ]);
 
-export function writeTools(root: string, outDir: string) {
+// `claim` decides whether this planner may write a file: laws planned at the
+// same time must not overwrite each other's files. It returns a reason to refuse.
+export function writeTools(root: string, outDir: string, repo = root, claim: (abs: string) => string | null = () => null) {
   return {
     write_file: defineTool({
       description: `Create or overwrite a file. Only paths inside ${relative(root, outDir)}/ are allowed.`,
@@ -174,6 +193,8 @@ export function writeTools(root: string, outDir: string) {
       execute: async ({ path, content, executable }) => {
         mkdirSync(outDir, { recursive: true });
         const abs = inside(root, path, outDir);
+        const refused = claim(abs);
+        if (refused) throw new Error(refused);
         mkdirSync(dirname(abs), { recursive: true });
         writeFileSync(abs, content, { mode: executable ? 0o755 : 0o644 });
         return `wrote ${relative(root, abs)}`;
@@ -189,16 +210,17 @@ export function writeTools(root: string, outDir: string) {
       execute: async ({ argv }) => {
         const bin = argv[0]!;
         const script = bin.includes("/") && !isAbsolute(bin);
-        if (script) inside(root, bin, outDir); // throws outside .verdict/
+        if (script) inside(root, bin, outDir); // throws outside the law's .verdict/
         else if (!RUNNABLE.has(bin)) throw new Error(`${bin} is not allowed`);
         else if (!Bun.which(bin)) return `${bin} is not installed`;
-        const r = await withScratch(root, async (dir) => {
+        const r = await withScratch(repo, async (copy) => {
+          const dir = join(copy, relative(repo, root));
           const jar = process.env.VERDICT_TLA2TOOLS; // TLC, when the planner runs it through java
-          const box = sandboxed(argv, { readable: [dir, root, ...(jar ? [jar] : [])], writable: [dir], network: false }, dir);
+          const box = sandboxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy], network: false }, dir);
           return exec(box.argv, { cwd: dir, env: box.env, cleanEnv: true, timeoutMs: 5 * 60_000 });
         });
         const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
-        if (broken) throw new Error(`couldn't start verdict's sandbox (${broken})`);
+        if (broken) throw new Error(`couldn't start verdict's sandbox (${broken}): if verdict already runs in a sandbox, set VERDICT_SANDBOX=off`);
         return tail(`exit ${r.code}\n${r.output}`, 200);
       },
     }),

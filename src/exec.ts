@@ -4,6 +4,7 @@ import { join } from "node:path";
 export interface ExecResult {
   code: number;
   output: string; // stdout + stderr
+  stdout: string;
 }
 
 // Finds a tool in the repo's node_modules/.bin first, then on PATH.
@@ -30,7 +31,7 @@ export async function exec(
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  return { code, output: (stdout + stderr).trim() };
+  return { code, output: (stdout + stderr).trim(), stdout };
 }
 
 export function tail(text: string, lines = 30): string {

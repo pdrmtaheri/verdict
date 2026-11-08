@@ -1,20 +1,132 @@
-7c91d875:
-  law: Only src/agents/ and src/models.ts talk to a coding agent or a model
-    provider; everything else goes through runAgent() or decisionModel().
+255a2f49:
+  law: Within src/, only src/agents/ and src/models.ts talk to a coding agent or a
+    model provider; the rest of src/ goes through runAgent() or decisionModel().
   enforcers:
-    - test: .verdict/provider-boundary.test.ts
-ba64ed02:
-  law: An agent's file tools never read or write outside the repository, and the
-    planner never writes outside .verdict/.
+    - test: .verdict/src-provider-boundary.test.ts
+      scope: every .ts/.tsx/.js/.jsx/.mjs/.cjs/.mts/.cts file under src/ (symlinks
+        skipped) except src/agents/** and src/models.ts; static text scan for
+        agent/provider packages, ai SDK use, adapter imports, agent CLIs by
+        literal name, provider hosts, reads of provider key/base-URL env values
+        (bare presence tests exempt), network calls; tests and .verdict/ not
+        covered
+      inputs:
+        .verdict/src-provider-boundary.test.ts: 40c57e6f6bd9
+        bunfig.toml: e8acd4c297ca
+539d28d7:
+  law: An agent's file tools never read or write outside the repository; the
+    planner never writes to the repository outside .verdict/, and anything it
+    runs can write only to a scratch copy.
   enforcers:
     - test: .verdict/agent-read-boundary.test.ts
-    - test: .verdict/planner-write-boundary.test.ts
+      inputs:
+        .verdict/agent-read-boundary.test.ts: e152a1aa0707
+        .verdict/agent-builtin-tools.judge.md: 378ff2b62234
+        bunfig.toml: e8acd4c297ca
+    - test: .verdict/planner-scratch-boundary.test.ts
+      inputs:
+        .verdict/planner-scratch-boundary.test.ts: dffe1c77700a
+        .verdict/planner-sandbox.judge.md: 243ff98c3880
+        .verdict/agent-builtin-tools.judge.md: 378ff2b62234
+        bunfig.toml: e8acd4c297ca
+    - llm: .verdict/planner-sandbox.judge.md
+      inputs:
+        .verdict/planner-sandbox.judge.md: 243ff98c3880
+        .verdict/planner-scratch-boundary.test.ts: dffe1c77700a
+        .verdict/agent-builtin-tools.judge.md: 378ff2b62234
     - llm: .verdict/agent-builtin-tools.judge.md
+      inputs:
+        .verdict/agent-builtin-tools.judge.md: 378ff2b62234
+        .verdict/planner-scratch-boundary.test.ts: dffe1c77700a
+        .verdict/agent-read-boundary.test.ts: e152a1aa0707
 408cc85a:
   law: "`verdict check` exits 0 only when no law fails and every law is planned."
   enforcers:
     - test: .verdict/check-exit-code.test.ts
+      inputs:
+        .verdict/check-exit-code.test.ts: 69804935e41c
+        bunfig.toml: e8acd4c297ca
 a3b28a29:
   law: Error messages tell the user what to do next.
   enforcers:
+    - test: .verdict/error-next-step-cli.test.ts
+      inputs:
+        .verdict/error-next-step-cli.test.ts: fc57d1195171
+        bunfig.toml: e8acd4c297ca
     - llm: .verdict/error-messages-next-step.judge.md
+      inputs:
+        .verdict/error-messages-next-step.judge.md: 3318db218d4d
+        .verdict/error-next-step-cli.test.ts: fc57d1195171
+f25eb789:
+  law: "Once the planner's submission is accepted, nothing the agent does
+    afterwards changes the plan: no later or concurrent submit is validated or
+    accepted, and runAgent returns the first submission it accepted."
+  enforcers:
+    - test: .verdict/submit-first-wins.test.ts
+      inputs:
+        .verdict/submit-first-wins.test.ts: 20821a8178ed
+        bunfig.toml: e8acd4c297ca
+    - test: .verdict/submit-schedules.test.ts
+      inputs:
+        .verdict/submit-schedules.test.ts: 9037b871fd4a
+        bunfig.toml: e8acd4c297ca
+    - test: .verdict/submit-agent-throws.test.ts
+      inputs:
+        .verdict/submit-agent-throws.test.ts: 95d95a55f018
+        bunfig.toml: e8acd4c297ca
+21becdf0:
+  law: However `verdict plan` is interrupted, and in whatever order laws are
+    added, reworded or removed, VERDICT.lock only holds entries for laws
+    currently in VERDICT.md, and running plan to completion afterwards leaves
+    every law planned.
+  enforcers:
+    - test: .verdict/plan-interrupt-lock.test.ts
+      inputs:
+        .verdict/plan-interrupt-lock.test.ts: a40a8f4c7c41
+        .verdict/plan-interrupt-runner.ts: d0e590ef5d02
+        bunfig.toml: e8acd4c297ca
+3d2d5b60:
+  law: The egress proxy never opens a connection to a host or port outside its
+    allowlist, however the request is split across packets, cased or padded.
+  enforcers:
+    - test: .verdict/egress-allowlist.test.ts
+      inputs:
+        .verdict/egress-allowlist.test.ts: b471bb508543
+        bunfig.toml: e8acd4c297ca
+10a12de4:
+  law: "`verdict check` never changes the repository: after it runs, git status
+    and the contents of every file are what they were before."
+  enforcers:
+    - test: .verdict/check-read-only.test.ts
+      inputs:
+        .verdict/check-read-only.test.ts: ba9cc54c4048
+        bunfig.toml: e8acd4c297ca
+23a2e318:
+  law: "`verdict plan` on a repo whose laws are all in sync, with every break
+    still caught, finishes without starting a coding agent."
+  enforcers:
+    - test: .verdict/plan-in-sync-no-agent.test.ts
+      inputs:
+        .verdict/plan-in-sync-no-agent.test.ts: caf1ad3d35d7
+        bunfig.toml: e8acd4c297ca
+44811e1b:
+  law: Re-wrapping or re-indenting a law in VERDICT.md never makes `verdict check`
+    report it as not planned; changing any of its words does.
+  enforcers:
+    - test: .verdict/rewrap-hash.test.ts
+      inputs:
+        .verdict/rewrap-hash.test.ts: 5a84fc731123
+        bunfig.toml: e8acd4c297ca
+39f2d5d6:
+  law: "verdict never runs a string as JavaScript: no eval() and no Function
+    constructor anywhere in src/."
+  enforcers:
+    - test: .verdict/no-eval.sh
+      inputs:
+        .verdict/no-eval.sh: 1c40d7480144
+        .verdict/no-eval.json: fcafdd16595f
+        bunfig.toml: e8acd4c297ca
+    - test: .verdict/no-dynamic-code-scan.test.ts
+      inputs:
+        .verdict/no-dynamic-code-scan.test.ts: 19dbddc3b528
+        .verdict/no-eval.sh: 1c40d7480144
+        bunfig.toml: e8acd4c297ca

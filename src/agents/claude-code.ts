@@ -34,7 +34,8 @@ export const claudeCode: Agent = {
     });
     for await (const message of session) {
       if (message.type === "result" && message.subtype !== "success" && message.subtype !== "error_max_turns") {
-        throw new Error(`Claude Code stopped: ${message.subtype}${"errors" in message ? `: ${(message.errors ?? []).join("; ")}` : ""}`);
+        const why = "errors" in message ? `: ${(message.errors ?? []).join("; ")}` : "";
+        throw new Error(`Claude Code stopped (${message.subtype}${why}). Check that \`claude\` works and is logged in (run \`claude\` once), then run verdict again`);
       }
     }
   },

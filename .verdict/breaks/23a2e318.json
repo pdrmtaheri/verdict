@@ -1,0 +1,13 @@
+[
+  {
+    "enforcer": ".verdict/plan-in-sync-no-agent.test.ts",
+    "description": "plan() re-plans laws that are in sync, so it starts the coding agent for them",
+    "edits": [
+      {
+        "path": "src/plan.ts",
+        "find": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\") {\n          // Nothing to re-plan",
+        "replace": "if (r.outcome !== \"drift\" && r.outcome !== \"newly failing\" && r.outcome !== \"in sync\") {\n          // Nothing to re-plan"
+      }
+    ]
+  }
+]

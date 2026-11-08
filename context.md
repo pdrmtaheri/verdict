@@ -151,3 +151,10 @@ OpenAI's hosts; Codex is told to use it through `respect_system_proxy` in its
 throwaway config. Not verified live (this dev session can't run Codex or nest
 sandboxes): if Codex ignores the proxy it fails to connect rather than
 connecting directly. Check this on a real machine with VERDICT_AGENT=codex.
+
+## Hierarchy (2026-11-08)
+
+Pedram: verdict should be hierarchical like a test runner; each subdirectory
+and module may have its own laws. Decided: a VERDICT.lock and .verdict/ beside
+each VERDICT.md (not one root lock), and `verdict check <path>` runs the laws
+declared in that subtree (not ancestors). No overrides of a parent's laws.

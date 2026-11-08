@@ -1,22 +1,28 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { ruleFiles } from "./init.ts";
+import { decisionModelsAvailable } from "./models.ts";
 import { z } from "zod";
 import { defineTool, runAgent } from "./agent.ts";
-import { Break, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
+import { Break, breakFor, breaksFile, Edit, prove, runInScratch, writeBreaks } from "./breaks.ts";
 import { KINDS, scopeOf, SKIPPED } from "./enforcers.ts";
 import { exec, which } from "./exec.ts";
 import type { Law } from "./laws.ts";
-import { writeLock, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
+import { enforcerId, writeLock, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
+import { inputsOf } from "./pins.ts";
+import { LINTERS, linterFor, scopeFiles } from "./linters.ts";
 import { refreshSpecs, reproveLaw, type Reproof } from "./reprove.ts";
 import { modelsOf, stampModels } from "./specbind.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
+import { label, type Where } from "./where.ts";
+import { jobs, makeLimit, type Limit } from "./limit.ts";
 
 export const OUT_DIR = ".verdict";
 
-const PROBE = ["semgrep", "eslint", "ruff", "golangci-lint", "clippy-driver", "mypy", "pyright", "tlc", "java", "go", "python3", "pytest", "cargo", "bun", "node"];
+const PROBE = ["semgrep", "eslint", "oxlint", "ruff", "golangci-lint", "clippy-driver", "mypy", "pyright", "tlc", "java", "go", "python3", "pytest", "cargo", "bun", "node"];
 
-const SYSTEM = `You plan how to enforce one law about a software repository. A law is
+export const SYSTEM = `You plan how to enforce one law about a software repository. A law is
 an assertion in prose. You pick the enforcer(s) that check it, write them into
 ${OUT_DIR}/, prove each one can fail, and call submit.
 
@@ -44,16 +50,30 @@ Rules
   Before you settle on a test alone, say in suggestions which other kinds you
   considered and why they don't fit.
 - Use the repo's own tooling when it is robust. Look at its config and
-  dependencies first. If the right tool for the law is not installed, still
-  write that enforcer and submit it: verdict records it as unproven and reports
-  it inconclusive until the tool is installed. Do not swap it for a test. Pair
-  it with a test that checks the same law in the repo's own framework, so the
-  law is covered meanwhile, and name the tool to install in suggestions.
+  dependencies first. If the right tool for the law is not installed (other
+  than TLC, covered below), still write that enforcer and submit it: verdict
+  records it as unproven and reports it inconclusive until the tool is
+  installed. Do not swap it for a test. Pair it with a test that checks the
+  same law in the repo's own framework, so the law is covered meanwhile, and
+  name the tool to install in suggestions.
+- Before writing a test, look for one the repo already has that checks the
+  law. If one does, point at it instead of copying it: its path (outside
+  ${OUT_DIR}/), the test's name if the file has others, and its scope in the
+  submission. Prove it like any enforcer: its break changes the code, never
+  the test or the runner's config. If it can't see a real violation, write
+  your own in ${OUT_DIR}/ and say what the existing one misses in suggestions.
+- When a law is about interleavings, concurrency, retries, crashes or "in any
+  order", a test only covers the schedules you wrote down. If TLC is installed,
+  model the design in TLA+ and check it, paired with a test generated from the
+  spec (see tla below): that covers every schedule up to the bound. If TLC
+  isn't installed, write the test, and add a suggestion that installing TLC
+  would let this law be model-checked.
 - Cover every way the law can be broken, not the convenient one: every entry
   point a user has (UI, CLI, API), every code path that writes the guarded state.
 - Keep each enforcer cheap to rerun: seconds, a few minutes at most. Choose
   bounds (model depth, input sizes) to fit.
-- Name files ${OUT_DIR}/<short-slug>.<ext>.
+- Name files ${OUT_DIR}/<short-slug>.<ext>. Other laws are planned at the same
+  time; if a name is taken, write_file says so: pick another.
 
 Every enforcer file states its scope
 - Near the top, a comment line "scope: <what this covers, its bounds and
@@ -90,6 +110,14 @@ Enforcer kinds (the "kind" in submit) and their file formats
      typescript-eslint rule, ...), written inside ${OUT_DIR}/ and run by a test
      script.
   4. A behavioural test or an LLM judge.
+- lint: a rule the project's own linter already has (eslint, oxlint, ruff).
+  path is the linter's config file (eslint.config.js, .eslintrc.*,
+  .oxlintrc.json, ruff.toml, pyproject.toml), rule is the rule's id, and
+  scope is globs relative to the law's directory (e.g. "src/**/*.ts").
+  verdict runs the linter under that config and keeps that rule's findings in
+  the scope. Use it instead of a semgrep rule when the project's linter
+  already checks the law; never write linter rules or configs of your own.
+  Its break is code that violates the rule.
 - test: one test file, run with the repo's test framework. The runner is
   inferred from the file name: *.test.ts / *.spec.ts (vitest, jest, playwright
   for .spec with @playwright/test, else bun test), *_test.go (go test on its
@@ -117,13 +145,13 @@ Enforcer kinds (the "kind" in submit) and their file formats
   replay each one against the real system through an adapter that maps spec
   actions to public calls.
   Bind the spec to the code it models: add a comment line per file, written
-  "models: <path>" (for example "\\* models: public/controller.js"). verdict
-  stamps each file's hash into that line. A spec whose files changed fails with
-  "the code this spec models changed" until \`verdict plan\` re-stamps it, so the
-  break for the spec is the same code edit the replay test catches: any edit to
-  a modeled file fails the spec, and the replay test says whether the code
-  still conforms. Name only the files the spec really describes; every edit to
-  them makes the spec stale.
+  "models: <path>" (for example "\\* models: public/controller.js"), relative to
+  the law's directory. verdict stamps each file's hash into that line. A spec
+  whose files changed fails with "the code this spec models changed" until
+  \`verdict plan\` re-stamps it, so the break for the spec is the same code edit
+  the replay test catches: any edit to a modeled file fails the spec, and the
+  replay test says whether the code still conforms. Name only the files the spec
+  really describes; every edit to them makes the spec stale.
 - decision: a decision model (jev by default) answering one choice question.
   JSON: {"scope": "...", "state_from": "<shell command that prints the text to
   judge>", "instructions": "<question>", "criteria": {"pass": "...", "fail":
@@ -137,7 +165,13 @@ Enforcer kinds (the "kind" in submit) and their file formats
 
 If the law is too vague to check, suggest a rewrite.`;
 
-const EnforcerRef = z.object({ kind: z.enum(KINDS as [string, ...string[]]), path: z.string() });
+const EnforcerRef = z.object({
+  kind: z.enum(KINDS as [string, ...string[]]),
+  path: z.string().describe(`A file you wrote in ${OUT_DIR}/, or a test file the repo already has`),
+  name: z.string().optional().describe("For a test file the repo already has: the one test that enforces the law, by its name"),
+  rule: z.string().optional().describe("For lint: the rule's id in the project's linter config (path is that config file)"),
+  scope: z.string().optional().describe(`What it covers. Required for a file outside ${OUT_DIR}/ (you can't add a scope line there)`),
+});
 
 const Submission = z.object({
   enforcers: z.array(EnforcerRef).min(1),
@@ -166,59 +200,79 @@ function show(r: Result): string {
 
 // Checks a submission the way verdict will use it. Returns a reason to
 // reject it, or notes for the person reviewing the plan.
-export async function validate(root: string, law: Law, sub: Submission): Promise<{ problem: string | null; notes: string[] }> {
+export async function validate(w: Where, law: Law, sub: Submission): Promise<{ problem: string | null; notes: string[] }> {
   const notes: string[] = [];
   let failsToday = false;
   for (const e of sub.enforcers) {
+    let ours = true;
     try {
-      inside(root, e.path, join(root, OUT_DIR));
-    } catch (err) {
-      return { problem: (err as Error).message, notes };
+      inside(w.dir, e.path, join(w.dir, OUT_DIR));
+    } catch {
+      ours = false;
     }
-    if (!existsSync(join(root, e.path))) return { problem: `${e.path} was not written`, notes };
-    if (!scopeOf(root, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
-    if (e.kind === "tla") {
-      const models = modelsOf(readFileSync(join(root, e.path), "utf8"));
-      if (models.length === 0) return { problem: `${e.path} must name the code it models: add a comment line "models: <file>" for each file the spec describes. verdict stamps their hash, so a spec whose code changed fails, and a break to that code makes it fail`, notes };
-      const bad = models.find((m) => m.file.startsWith(OUT_DIR) || !existsSync(join(root, m.file)));
-      if (bad) return { problem: `${e.path} says it models ${bad.file}, which is not a file of the system under check`, notes };
-      if (!sub.enforcers.some((x) => x.kind !== "tla")) return { problem: `a spec only proves the design: submit a test that replays ${e.path} against the real code alongside it`, notes };
-      stampModels(root, e.path);
+    if (!ours) {
+      // A test the project already has: verdict points at it and never edits it.
+      try {
+        inside(w.dir, e.path, w.repo);
+      } catch (err) {
+        return { problem: (err as Error).message, notes };
+      }
+      if (e.kind !== "test" && e.kind !== "lint") return { problem: `${e.path} is outside ${OUT_DIR}/: only a test or a linter config the repo already has can be used where it is; write a ${e.kind} enforcer in ${OUT_DIR}/`, notes };
+      if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} doesn't exist`, notes };
+      if (!e.scope) return { problem: `${e.path} is the repo's own file: give its scope in the submission`, notes };
+      if (e.kind === "lint" && !linterFor(e.path)) return { problem: `${e.path} isn't a config file verdict can read for lint (${LINTERS.map((l) => l.name).join(", ")}); for another linter, write an executable test in ${OUT_DIR}/ that runs it`, notes };
+      if (e.kind === "lint" && !e.rule) return { problem: `the lint enforcer ${e.path} needs the rule's id`, notes };
+      if (e.kind === "lint" && scopeFiles(w.dir, e.scope).length === 0) return { problem: `the scope "${e.scope}" matches no files: for lint it is globs relative to the law's directory`, notes };
+    } else if (e.kind === "lint") {
+      return { problem: `a lint enforcer points at the project's own linter config, not a file in ${OUT_DIR}/; to write a rule of your own, use semgrep`, notes };
+    } else {
+      if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
+      if (!e.scope && !scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
+      if (e.kind === "tla") {
+        const models = modelsOf(readFileSync(join(w.dir, e.path), "utf8"));
+        if (models.length === 0) return { problem: `${e.path} must name the code it models: add a comment line "models: <file>" for each file the spec describes. verdict stamps their hash, so a spec whose code changed fails, and a break to that code makes it fail`, notes };
+        const bad = models.find((m) => m.file.startsWith(OUT_DIR) || !existsSync(join(w.dir, m.file)));
+        if (bad) return { problem: `${e.path} says it models ${bad.file}, which is not a file of the system under check`, notes };
+        if (!sub.enforcers.some((x) => x.kind !== "tla")) return { problem: `a spec only proves the design: submit a test that replays ${e.path} against the real code alongside it`, notes };
+        stampModels(w.dir, e.path);
+      }
     }
-    const today = await runInScratch(root, law.text, e);
+    const today = await runInScratch(w, law.text, e);
     if (today.status === "fail") {
       failsToday = true;
-      notes.push(`${e.path} fails on today's code`);
+      notes.push(`${enforcerId(e)} fails on today's code: see the finding below`);
       continue;
     }
     if (today.status === "inconclusive") {
-      notes.push(`${e.path} is inconclusive today and is unproven (${today.message.split("\n")[0]})`);
+      notes.push(`${enforcerId(e)} is inconclusive today, so it is unproven (${today.message.split("\n")[0]}): fix that, then run \`verdict plan --again ${law.hash}\` to prove it`);
       continue;
     }
-    const brk = sub.breaks.find((b) => b.enforcer === e.path);
-    if (!brk) return { problem: `${e.path} passes today; submit a break that makes it fail`, notes };
-    const proof = await prove(root, law.text, e, brk);
-    if (proof.kind === "missed") return { problem: `${e.path} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
-    if (proof.kind === "stale") return { problem: `the break for ${e.path} doesn't apply: ${proof.reason}`, notes };
-    if (proof.kind === "unknown") notes.push(`${e.path} was inconclusive on its break (${proof.result.message.split("\n")[0]})`);
-    else notes.push(`${e.path} caught its break: ${brk.description}`);
+    const id = enforcerId(e);
+    if (sub.enforcers.filter((o) => enforcerId(o) === id).length > 1) return { problem: `${id} is listed twice: give each enforcer a different path, rule or test name`, notes };
+    const brk = breakFor(sub.breaks, e, sub.enforcers);
+    if (!brk) return { problem: `${id} passes today; submit a break with enforcer "${id}" that makes it fail`, notes };
+    const proof = await prove(w, law.text, e, brk);
+    if (proof.kind === "missed") return { problem: `${id} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
+    if (proof.kind === "stale") return { problem: `the break for ${id} doesn't apply: ${proof.reason}`, notes };
+    if (proof.kind === "unknown") notes.push(`${id} was inconclusive on its break, so it is unproven (${proof.result.message.split("\n")[0]}): fix that, then run \`verdict plan --again ${law.hash}\``);
+    else notes.push(`${id} caught its break: ${brk.description}`);
   }
   if (failsToday && !sub.finding) return { problem: "the law fails on today's code; describe the counterexample in finding", notes };
   return { problem: null, notes };
 }
 
-function planTools(root: string, law: Law) {
+function planTools(w: Where, law: Law) {
   return {
     run_enforcer: defineTool({
       description: "Run one enforcer on a sandboxed scratch copy of the repo, the way verdict validates your plan.",
       schema: EnforcerRef,
-      execute: async (e) => show(await runInScratch(root, law.text, e)),
+      execute: async (e) => show(await runInScratch(w, law.text, e)),
     }),
     try_break: defineTool({
       description: "Apply edits to a scratch copy of the repo and run one enforcer there. The repo is never changed.",
       schema: z.object({ enforcer: EnforcerRef, edits: z.array(Edit).min(1) }),
       execute: async ({ enforcer, edits }) => {
-        const p = await prove(root, law.text, enforcer, { enforcer: enforcer.path, description: "trial", edits });
+        const p = await prove(w, law.text, enforcer, { enforcer: enforcerId(enforcer), description: "trial", edits });
         if (p.kind === "stale") return `the edits don't apply: ${p.reason}`;
         return `${p.kind === "caught" ? "caught" : p.kind === "missed" ? "missed: the enforcer passed" : "inconclusive"} (${show(p.result)})`;
       },
@@ -226,21 +280,33 @@ function planTools(root: string, law: Law) {
   };
 }
 
-export async function planLaw(root: string, law: Law, context = ""): Promise<PlanOutcome> {
-  // TLC counts as installed when VERDICT_TLA2TOOLS names tla2tools.jar and Java is there.
+export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: string) => string | null): Promise<PlanOutcome> {
+  const installed = PROBE.filter((t) => which(w.dir, t));
   const jar = process.env.VERDICT_TLA2TOOLS;
-  const installed = PROBE.filter((t) => which(root, t) || (t === "tlc" && jar && which(root, "java")));
+  if (jar && existsSync(jar) && !installed.includes("tlc")) installed.push("tlc (tla2tools.jar via VERDICT_TLA2TOOLS)");
+  // A decision enforcer runs only with a key; without one it's always inconclusive.
+  installed.push(decisionModelsAvailable() ? "decision models (TYPESAFE_AI_API_KEY is set)" : "no decision models (TYPESAFE_AI_API_KEY isn't set: use an llm judge instead)");
+  const where =
+    w.dir === w.repo
+      ? "The law is declared in VERDICT.md at the repo root and applies to the whole repo."
+      : `The law is declared in ${label(w)}/VERDICT.md and applies to that directory's subtree only. ` +
+        `Paths are relative to ${label(w)}/; ../ reaches the rest of the repo for context. ` +
+        `Write enforcers in ${label(w)}/${OUT_DIR}/ and scope them to that subtree.`;
+  const rules = [...new Set([...ruleFiles(w.repo).map((f) => relative(w.dir, join(w.repo, f))), ...ruleFiles(w.dir)])];
+  const guides = rules.length
+    ? `\n\nThe project's own rules for people and agents, worth reading for context (they are not laws): ${rules.join(", ")}`
+    : "";
   let notes: string[] = [];
   const submission = await runAgent({
     system: SYSTEM,
-    prompt: `Law: ${law.text}\n\nInstalled tools: ${installed.join(", ") || "none"}${jar && installed.includes("tlc") && !which(root, "tlc") ? `\n(tlc is not a command here: run TLC as java -Djava.io.tmpdir=. -cp ${jar} tlc2.TLC, from the repo root; the tmpdir flag lets it unpack its standard modules inside the sandbox)` : ""}${context ? `\n\n${context}` : ""}`,
-    tools: { ...readTools(root), ...writeTools(root, join(root, OUT_DIR)), ...planTools(root, law) },
-    cwd: root,
+    prompt: `Law: ${law.text}\n\n${where}\n\nInstalled tools: ${installed.join(", ") || "none"}${guides}${context ? `\n\n${context}` : ""}`,
+    tools: { ...readTools(w.dir, w.repo), ...writeTools(w.dir, join(w.dir, OUT_DIR), w.repo, claim), ...planTools(w, law) },
+    cwd: w.dir,
     submit: {
       description: "Submit the enforcers for this law, with a break for each one that passes today.",
       schema: Submission,
       validate: async (sub) => {
-        const v = await validate(root, law, sub);
+        const v = await validate(w, law, sub);
         notes = v.notes;
         return v.problem;
       },
@@ -248,11 +314,11 @@ export async function planLaw(root: string, law: Law, context = ""): Promise<Pla
     maxSteps: 100,
     reasoning: "high",
   });
-  if (!submission) return { law, breaks: [], notes, suggestions: [], error: "the planner did not submit a plan that verdict could accept" };
+  if (!submission) return { law, breaks: [], notes, suggestions: [], error: "the planner stopped without a plan verdict could accept: read the rejections above, then run `verdict plan` again (a stronger VERDICT_MODEL or higher VERDICT_REASONING may help)" };
   return {
     law,
     entry: { law: law.text, enforcers: submission.enforcers },
-    breaks: submission.breaks.filter((b) => submission.enforcers.some((e) => e.path === b.enforcer)),
+    breaks: submission.breaks.filter((b) => submission.enforcers.some((e) => breakFor([b], e, submission.enforcers))),
     finding: submission.finding,
     notes,
     suggestions: submission.suggestions,
@@ -263,21 +329,25 @@ export function logOutcome(o: PlanOutcome, log: (line: string) => void): void {
   if (!o.entry) return log(`  error: ${o.error}`);
   for (const e of o.entry.enforcers) log(`  ${e.kind}: ${e.path}`);
   for (const n of o.notes) log(`  ${n}`);
-  if (o.finding) log(`  finding: the law looks false in today's code:\n${o.finding.replace(/^/gm, "    ")}`);
+  if (o.finding) {
+    log(`  finding: the law looks false in today's code:\n${o.finding.replace(/^/gm, "    ")}`);
+    log("  verdict check fails this law until the code is fixed; if the law changed on purpose, edit it in VERDICT.md and run `verdict plan`");
+  }
   for (const s of o.suggestions) log(`  suggestion: ${s}`);
 }
 
 // The commit at which a law's enforcers were last proven, read from git
 // rather than stored: the last commit that touched its breaks file.
-async function lastProven(root: string, hash: string): Promise<string | null> {
-  const r = await exec(["git", "log", "-1", "--format=%h", "--", breaksFile(root, hash)], { cwd: root });
+async function lastProven(w: Where, hash: string): Promise<string | null> {
+  const r = await exec(["git", "log", "-1", "--format=%h", "--", breaksFile(w.dir, hash)], { cwd: w.dir });
   return r.code === 0 && r.output ? r.output : null;
 }
 
-const TRIAGE = `This law is already planned, but an enforcer can no longer be shown to
-fail on today's code: its break no longer applies, or the enforcer passes on
-code broken on purpose. The current enforcers are listed below; read them, and
-read the code as it is now. Decide which of these happened, and say which in
+const TRIAGE = `This law is already planned, but something changed: an enforcer can no
+longer be shown to fail on today's code (its break no longer applies, or it
+passes on code broken on purpose), or an enforcer passed when it was planned
+and fails now. The current enforcers are listed below; read them, and read
+the code as it is now. Decide which of these happened, and say which in
 suggestions:
 - The enforcer no longer describes the code (a function moved, a step split, a
   new path writes the guarded state). Update the enforcer and its break from the
@@ -286,12 +356,15 @@ suggestions:
 - The promise changed on purpose, and evidence says so (a commit message, docs,
   tests, a changelog). Don't change what the enforcer checks; cite the evidence
   and suggest that a person edit the law in VERDICT.md.
-- The code breaks the law. Keep the enforcer failing and put the counterexample
-  in finding, naming the commit that introduced it if you can find it.
+- The enforcer depended on something incidental that changed while the promise
+  still holds: an exact message, a file's path, an import. Make it check the
+  promise itself, and say what it depended on.
+- The code breaks the law (a regression). Keep the enforcer failing and put the
+  counterexample in finding, naming the commit that introduced it if you can.
 Never weaken an enforcer to make it pass.`;
 
-async function triageContext(root: string, law: Law, lock: Lock, r: Reproof): Promise<string> {
-  const since = await lastProven(root, law.hash);
+async function triageContext(w: Where, law: Law, lock: Lock, r: Reproof): Promise<string> {
+  const since = await lastProven(w, law.hash);
   return [
     TRIAGE,
     `Current enforcers:\n${lock.get(law.hash)!.enforcers.map((e) => `- ${e.kind}: ${e.path}`).join("\n")}`,
@@ -309,49 +382,116 @@ function logReproof(r: Reproof, log: (line: string) => void): void {
   }
 }
 
+// Who owns which file in .verdict/ while laws are planned at the same time.
+// A file belongs to the law whose lock entry names it, or to the planner that
+// wrote it first in this run; a planner may write new files and its own.
+export class Claims {
+  private owner = new Map<string, string>();
+
+  constructor(entries: { dir: string; lock: Lock }[] = []) {
+    for (const { dir, lock } of entries) {
+      for (const [hash, entry] of lock) for (const e of entry.enforcers) this.owner.set(join(dir, e.path), hash);
+    }
+  }
+
+  for(hash: string): (abs: string) => string | null {
+    return (abs) => {
+      const owner = this.owner.get(abs);
+      if (owner && owner !== hash) return `${abs} belongs to another law; pick another file name`;
+      this.owner.set(abs, hash);
+      return null;
+    };
+  }
+}
+
+export interface PlanOptions {
+  limit?: Limit; // shared across VERDICT.md files; defaults to VERDICT_JOBS
+  claims?: Claims;
+  again?: (law: Law) => boolean; // re-plan these even if they're in sync
+}
+
+const AGAIN = `A person asked for this law to be planned again, though it is already
+planned. Its current enforcers are listed below. Plan it afresh with what is
+available now (for example, TLC may be installed where it wasn't before):
+keep what is good, replace what a stronger enforcer would do better, and say
+what you changed and why in suggestions. Never weaken an enforcer.`;
+
 // Brings the lock in line with VERDICT.md and the code, like a package
 // manager's sync: laws that are new or reworded get planned; planned laws get
 // their breaks replayed on today's code, and the ones that drifted (a break no
-// longer applies, or an enforcer can't see it) get re-planned. Laws that fail
-// today are reported, not re-planned: that is a finding, not drift.
+// longer applies, or an enforcer can't see it) get re-planned, as do laws that
+// passed when planned and fail now. A law that already failed when it was
+// planned is reported, not re-planned: that is a known finding.
 // Entries for removed laws are dropped.
+//
+// Laws run in parallel, up to the limit. Each law's results are logged as one
+// block when it finishes; the lock is written after each law.
 export async function plan(
-  root: string,
+  w: Where,
   lockFile: string,
   laws: Law[],
   lock: Lock,
   log: (line: string) => void,
+  opts: PlanOptions = {},
 ): Promise<boolean> {
+  const limit = opts.limit ?? makeLimit(jobs());
+  const claims = opts.claims ?? new Claims([{ dir: w.dir, lock }]);
   let ok = true;
+  let stopped = false;
   writeLock(lockFile, lock, laws);
-  for (const law of laws) {
-    let context = "";
-    if (lock.has(law.hash)) {
-      await refreshSpecs(root, law, lock, log);
-      const r = await reproveLaw(root, law, lock);
-      logReproof(r, log);
-      if (r.outcome !== "drift") continue;
-      context = await triageContext(root, law, lock, r);
-      log(`  re-planning`);
-    } else {
-      log(`planning: ${law.text}`);
-    }
-    let outcome: PlanOutcome;
+
+  const one = async (law: Law) => {
+    if (stopped) return;
+    const lines: string[] = [];
+    const say = (line: string) => lines.push(line);
     try {
-      outcome = await planLaw(root, law, context);
-    } catch (err) {
-      // e.g. a missing API key: the same error would repeat for every law.
-      log(`  error: ${err instanceof Error ? err.message : String(err)}`);
-      return false;
+      let context = "";
+      if (lock.has(law.hash) && opts.again?.(law)) {
+        const entry = lock.get(law.hash)!;
+        context = `${AGAIN}\n\nCurrent enforcers:\n${entry.enforcers.map((e) => `- ${e.kind}: ${e.path}`).join("\n")}`;
+        log(`planning again: ${law.text}`);
+        say(`planned again: ${law.text}`);
+      } else if (lock.has(law.hash)) {
+        await refreshSpecs(w, law, lock, say);
+        const r = await reproveLaw(w, law, lock);
+        logReproof(r, say);
+        if (r.outcome !== "drift" && r.outcome !== "newly failing") {
+          // Nothing to re-plan; record what each enforcer was just proven against.
+          if (JSON.stringify(r.pinned) !== JSON.stringify(lock.get(law.hash))) {
+            lock.set(law.hash, r.pinned);
+            writeLock(lockFile, lock, laws);
+          }
+          return;
+        }
+        context = await triageContext(w, law, lock, r);
+        say(`  re-planning`);
+      } else {
+        log(`planning: ${law.text}`);
+        say(`planned: ${law.text}`);
+      }
+      let outcome: PlanOutcome;
+      try {
+        outcome = await planLaw(w, law, context, claims.for(law.hash));
+      } catch (err) {
+        // e.g. not logged in: the same error would repeat for every law.
+        say(`  error: ${err instanceof Error ? err.message : String(err)}`);
+        stopped = true;
+        ok = false;
+        return;
+      }
+      logOutcome(outcome, say);
+      if (!outcome.entry) {
+        ok = false;
+        return;
+      }
+      lock.set(law.hash, { ...outcome.entry, enforcers: outcome.entry.enforcers.map((e) => ({ ...e, inputs: inputsOf(w, e) })) });
+      writeBreaks(w.dir, law.hash, outcome.breaks);
+      writeLock(lockFile, lock, laws);
+    } finally {
+      if (lines.length) log(lines.join("\n"));
     }
-    logOutcome(outcome, log);
-    if (!outcome.entry) {
-      ok = false;
-      continue;
-    }
-    lock.set(law.hash, outcome.entry);
-    writeBreaks(root, law.hash, outcome.breaks);
-    writeLock(lockFile, lock, laws);
-  }
+  };
+
+  await Promise.all(laws.map((law) => limit(() => one(law))));
   return ok;
 }

@@ -1,0 +1,24 @@
+[
+  {
+    "enforcer": ".verdict/plan-interrupt-lock.test.ts",
+    "description": "plan() no longer rewrites the lock from the current laws when it starts, so entries for removed or reworded laws stay in VERDICT.lock after an interrupt",
+    "edits": [
+      {
+        "path": "src/plan.ts",
+        "find": "  let stopped = false;\n  writeLock(lockFile, lock, laws);\n",
+        "replace": "  let stopped = false;\n"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/plan-interrupt-lock.test.ts",
+    "description": "writeLock() writes every entry in the lock instead of only the entries for laws in VERDICT.md",
+    "edits": [
+      {
+        "path": "src/lock.ts",
+        "find": "  for (const { hash } of laws) {\n    const entry = lock.get(hash);\n    if (!entry) continue;\n    doc[hash] = {\n      law: entry.law,\n      enforcers: entry.enforcers.map((e) => ({ [e.kind]: e.path })),\n    };\n  }",
+        "replace": "  for (const [hash, entry] of lock) {\n    doc[hash] = {\n      law: entry.law,\n      enforcers: entry.enforcers.map((e) => ({ [e.kind]: e.path })),\n    };\n  }"
+      }
+    ]
+  }
+]

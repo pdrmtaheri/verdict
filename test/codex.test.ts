@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { runAgent } from "../src/agent.ts";
+import { testing } from "../src/agents/codex.ts";
 
 // A fake `codex app-server`: answers the handshake, then calls verdict's
 // submit tool and asks to run a command, and records what verdict answered.
@@ -31,6 +32,7 @@ for await (const chunk of process.stdin) {
 
 const saved = { path: process.env.PATH, agent: process.env.VERDICT_AGENT, sandbox: process.env.VERDICT_SANDBOX };
 afterEach(() => {
+  delete testing.launch;
   process.env.PATH = saved.path;
   if (saved.sandbox === undefined) delete process.env.VERDICT_SANDBOX;
   else process.env.VERDICT_SANDBOX = saved.sandbox;
@@ -40,7 +42,7 @@ afterEach(() => {
 
 // The protocol is tested without verdict's sandbox; the sandbox has its own tests.
 test("codex: verdict's tools work over app-server, and command approvals are declined", async () => {
-  process.env.VERDICT_SANDBOX = "off";
+  testing.launch = async () => ({ argv: [join(bin, "codex"), "app-server"], env: { ...process.env } as Record<string, string>, done: async () => {} });
   const bin = mkdtempSync(join(process.env.TMPDIR!, "verdict-fake-codex-"));
   writeFileSync(join(bin, "codex"), FAKE);
   chmodSync(join(bin, "codex"), 0o755);
@@ -65,4 +67,11 @@ test("codex: verdict's tools work over app-server, and command approvals are dec
   expect(seen.find((m) => m.method === "initialize").params.capabilities.experimentalApi).toBe(true);
   expect(seen.find((m) => m.id === 900).result).toEqual({ decision: "decline" });
   expect(seen.find((m) => m.id === 901).result.success).toBe(true);
+});
+
+test("codex: verdict refuses to start Codex without its sandbox", async () => {
+  process.env.VERDICT_SANDBOX = "off";
+  process.env.VERDICT_AGENT = "codex";
+  const run = runAgent({ system: "s", prompt: "p", tools: {}, cwd: ".", submit: { description: "submit", schema: z.object({}) } });
+  await expect(run).rejects.toThrow("set VERDICT_AGENT=claude-code or pi");
 });

@@ -31,3 +31,15 @@ test("re-wrapping a law keeps its hash; editing its words changes it", () => {
 test("a non-indented line ends a law", () => {
   expect(parseLaws("- one\nnot part of it\n  nor this").map((l) => l.text)).toEqual(["one"]);
 });
+
+test("a corrupt or malformed lock is a message that says what to do", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { readLock, BadLock } = await import("../src/lock.ts");
+  const dir = mkdtempSync(join(process.env.TMPDIR!, "verdict-lock-"));
+  for (const [body, said] of [["{{ not: [yaml\n", "not valid YAML"], ["- a\n- b\n", "isn't a verdict lock"], ["abc:\n  nolaw: 1\n", "isn't a verdict lock"]]) {
+    writeFileSync(join(dir, "VERDICT.lock"), body);
+    expect(() => readLock(join(dir, "VERDICT.lock"))).toThrow(BadLock);
+    expect(() => readLock(join(dir, "VERDICT.lock"))).toThrow(said);
+  }
+});
