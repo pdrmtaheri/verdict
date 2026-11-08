@@ -103,14 +103,29 @@ export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Pr
     },
   });
   const agent = await pickAgent();
-  await agent.run({
-    system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
-    prompt: opts.prompt,
-    tools: { ...opts.tools, submit },
-    cwd: opts.cwd,
-    maxSteps: opts.maxSteps ?? 40,
-    reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
-    model: process.env.VERDICT_MODEL,
-  });
-  return submitted;
+  let failure: unknown = null;
+  try {
+    await agent.run({
+      system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
+      prompt: opts.prompt,
+      tools: { ...opts.tools, submit },
+      cwd: opts.cwd,
+      maxSteps: opts.maxSteps ?? 40,
+      reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
+      model: process.env.VERDICT_MODEL,
+    });
+  } catch (err) {
+    failure = err;
+  }
+  // An agent that doesn't wait for its own tool calls can finish while a
+  // submit is still being validated: let it settle first.
+  for (let settled = queue; ; settled = queue) {
+    await settled;
+    if (settled === queue) break;
+  }
+  // Once a plan is accepted it stands, whatever the agent does afterwards
+  // (an adapter throws on a non-success result, a protocol error, the step limit).
+  if (submitted) return submitted;
+  if (failure) throw failure;
+  return null;
 }
