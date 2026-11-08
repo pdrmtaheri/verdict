@@ -1,0 +1,8 @@
+{
+  "categories": { "correctness": "off" },
+  "rules": {
+    "no-eval": "error",
+    "no-new-func": "error",
+    "no-implied-eval": "error"
+  }
+}

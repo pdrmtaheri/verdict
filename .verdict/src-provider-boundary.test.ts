@@ -1,15 +1,15 @@
-// scope: every .ts/.tsx/.js/.jsx/.mjs/.cjs/.mts/.cts file under the repo root, tests included (.verdict/, node_modules/, .git and symlinks skipped), except src/agents/** and src/models.ts; flags agent or provider packages, the ai SDK (except { experimental_decide } in src/enforcers.ts, which must take its model from decisionModel()), relative imports into src/agents/ (only src/agent.ts, the runAgent() gateway, may import them), non-literal import()/require(), SDK calls like generateText or createAgentSession, claude/codex/pi and similar CLIs spawned or located by literal name, provider hosts and provider key or base-URL env reads, and network calls (fetch, WebSocket, Bun.connect, http/https/undici/axios); static text only, so a route reached through a computed name is caught only where it shows as a bare fetch, Bun[...], or a non-literal import; runs no agent or provider, so a pass means the code's text has no route to one, not that none exists at runtime
+// scope: every .ts/.tsx/.js/.jsx/.mjs/.cjs/.mts/.cts file under src/ (symlinks skipped), except src/agents/** and src/models.ts; flags agent or provider packages, the ai SDK (except { experimental_decide } in src/enforcers.ts, which must take its model from decisionModel()), relative imports into src/agents/ (only src/agent.ts, the runAgent() gateway, may import them), non-literal import()/require(), SDK calls like generateText or createAgentSession, claude/codex/pi and similar CLIs spawned or located by literal name, provider hosts and provider key or base-URL env reads, and network calls (fetch, WebSocket, Bun.connect, http/https/undici/axios); static text only, so a route reached through a computed name or a binary held in a variable is caught only where it shows as a bare fetch, Bun[...], or a non-literal import; files outside src/ (tests, .verdict/) are not covered; runs no agent or provider, so a pass means the code's text has no route to one, not that none exists at runtime
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { extname, join, posix, relative, sep } from "node:path";
 
 const ROOT = process.cwd();
+const SRC = join(ROOT, "src");
 const LOADER: Record<string, "ts" | "tsx" | "js" | "jsx"> = {
   ".ts": "ts", ".mts": "ts", ".cts": "ts", ".tsx": "tsx",
   ".js": "js", ".mjs": "js", ".cjs": "js", ".jsx": "jsx",
 };
-const SKIP = new Set(["node_modules", ".git", ".verdict"]);
 
 // The only files that may talk to a coding agent or a model provider.
 const isAllowed = (p: string) => p === "src/models.ts" || p.startsWith("src/agents/");
@@ -66,7 +66,7 @@ interface Scanned {
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isSymbolicLink() || SKIP.has(entry.name)) continue;
+    if (entry.isSymbolicLink()) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) sourceFiles(full, out);
     else if (entry.isFile() && LOADER[extname(entry.name)]) out.push(relative(ROOT, full).split(sep).join("/"));
@@ -131,11 +131,11 @@ function violations(s: Scanned): string[] {
   return out;
 }
 
-const scanned = sourceFiles(ROOT).sort().map(scan);
+const scanned = existsSync(SRC) ? sourceFiles(SRC).sort().map(scan) : [];
 const found = scanned.flatMap((s) => (isAllowed(s.path) ? [] : violations(s)));
 
-describe("only src/agents/ and src/models.ts reach a coding agent or model provider", () => {
-  test("no other file in the repo does", () => {
+describe("within src/, only src/agents/ and src/models.ts reach a coding agent or model provider", () => {
+  test("no other file in src/ does", () => {
     if (found.length > 0) {
       throw new Error(`${found.length} route(s) outside src/agents/ and src/models.ts:\n${found.join("\n")}`);
     }
@@ -152,8 +152,20 @@ describe("only src/agents/ and src/models.ts reach a coding agent or model provi
   test("the scanner sees the sanctioned routes", () => {
     const byPath = new Map(scanned.map((s) => [s.path, s]));
     expect(byPath.get("src/agents/claude-code.ts")!.imports.map((i) => i.path)).toContain("@anthropic-ai/claude-agent-sdk");
-    expect(byPath.get("src/agents/codex.ts")!.code).toMatch(/spawn\(\s*\[\s*"codex"/);
+    expect(byPath.get("src/agents/codex.ts")!.code).toMatch(/which\(\s*"codex"/);
     expect(byPath.get("src/models.ts")!.imports.map((i) => i.path)).toContain("@ai-sdk/typesafe-ai");
     expect(byPath.get("src/enforcers.ts")!.code).toMatch(/experimental_decide\(\s*\{\s*model:\s*decisionModel\(/);
+    // The scanner's own rules fire on a known-bad snippet.
+    const bad = scan("src/agent.ts");
+    expect(bad.imports.some((i) => i.path.startsWith("./agents/"))).toBe(true);
+  });
+
+  test("the rules flag known-bad snippets", () => {
+    const tr = new Bun.Transpiler({ loader: "ts" });
+    const code = tr.transformSync(`Bun.spawn(["claude", "-p"]); fetch("x"); generateText({});`);
+    const hits = RULES.filter((r) => [...code.matchAll(r.re)].length > 0).map((r) => r.name);
+    expect(hits).toContain("agent CLI spawned by literal name");
+    expect(hits).toContain("network call");
+    expect(hits).toContain("SDK call outside src/agents/ and src/models.ts");
   });
 });

@@ -1,0 +1,62 @@
+[
+  {
+    "enforcer": ".verdict/egress-allowlist.test.ts",
+    "description": "drop the port allowlist check so any port on an allowed host is tunnelled",
+    "edits": [
+      {
+        "path": "src/agents/egress.ts",
+        "find": "!allowed.has(host) || !ports.includes(port)",
+        "replace": "!allowed.has(host)"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/egress-allowlist.test.ts",
+    "description": "drop the host allowlist check so any host on an allowed port is tunnelled",
+    "edits": [
+      {
+        "path": "src/agents/egress.ts",
+        "find": "!allowed.has(host) || !ports.includes(port)",
+        "replace": "!ports.includes(port)"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/egress-allowlist.test.ts",
+    "description": "treat localhost as an alias of an allowed host",
+    "edits": [
+      {
+        "path": "src/agents/egress.ts",
+        "find": "!allowed.has(host) || !ports.includes(port)",
+        "replace": "!(allowed.has(host) || host === \"localhost\") || !ports.includes(port)"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/egress-allowlist.test.ts",
+    "description": "parse the request leniently: fall back to an unanchored CONNECT search over the whole buffer, validating a prefix only",
+    "edits": [
+      {
+        "path": "src/agents/egress.ts",
+        "find": "const m = /^CONNECT ([^\\s:]+):(\\d+) HTTP\\/1\\.[01]\\r\\n/i.exec(head.subarray(0, end + 4).toString(\"latin1\"));",
+        "replace": "const first = head.subarray(0, Math.min(head.length, 40)).toString(\"latin1\");\n      const m = /^CONNECT ([^\\s:]+):(\\d+) HTTP\\/1\\.[01]\\r\\n/i.exec(first) ?? /CONNECT ([^\\s:]+):(\\d+)/i.exec(head.toString(\"latin1\"));"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/egress-allowlist.test.ts",
+    "description": "wrap the port modulo 65536 when checking and connecting, so a padded port reaches an allowed one",
+    "edits": [
+      {
+        "path": "src/agents/egress.ts",
+        "find": "!allowed.has(host) || !ports.includes(port)",
+        "replace": "!allowed.has(host) || !ports.includes(port % 65536)"
+      },
+      {
+        "path": "src/agents/egress.ts",
+        "find": "const upstream = connect(port, host,",
+        "replace": "const upstream = connect(port % 65536, host,"
+      }
+    ]
+  }
+]

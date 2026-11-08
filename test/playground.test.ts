@@ -143,7 +143,7 @@ test("lawViews joins laws, the lock and the latest report", async () => {
   const views = lawViews(root, null);
   expect(views.map((v) => v.status)).toEqual(["unchecked", "unplanned"]);
   expect(views[0]!.enforcers[0]).toMatchObject({ kind: "test", path: ".verdict/a.sh", status: null });
-  const report = [{ law: "Things are fine.", status: "fail" as const, details: [{ kind: "test", path: ".verdict/a.sh", result: { status: "fail" as const, message: "boom" }, scope: null }] }];
+  const report = [{ law: "Things are fine.", status: "fail" as const, details: [{ id: ".verdict/a.sh", kind: "test", path: ".verdict/a.sh", result: { status: "fail" as const, message: "boom" }, scope: null, warnings: [] }] }];
   const after = lawViews(root, report);
   expect(after[0]).toMatchObject({ status: "fail" });
   expect(after[0]!.enforcers[0]).toMatchObject({ status: "fail", message: "boom" });

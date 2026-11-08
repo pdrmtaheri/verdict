@@ -1,0 +1,35 @@
+[
+  {
+    "enforcer": ".verdict/no-eval.sh",
+    "description": "jobs() in src/limit.ts calls eval() on an env-supplied string",
+    "edits": [
+      {
+        "path": "src/limit.ts",
+        "find": "export function jobs(): number {",
+        "replace": "export function jobs(): number {\n  eval(process.env.VERDICT_JOBS_EXPR ?? \"1\");"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/no-dynamic-code-scan.test.ts",
+    "description": "src/limit.ts imports runInNewContext from node:vm and runs an env-supplied string in jobs()",
+    "edits": [
+      {
+        "path": "src/limit.ts",
+        "find": "export function jobs(): number {",
+        "replace": "import { runInNewContext } from \"node:vm\";\nexport function jobs(): number {\n  runInNewContext(process.env.VERDICT_JOBS_EXPR ?? \"1\");"
+      }
+    ]
+  },
+  {
+    "enforcer": ".verdict/no-dynamic-code-scan.test.ts",
+    "description": "jobs() in src/limit.ts builds a function from an env-supplied string through (() => {}).constructor(...)",
+    "edits": [
+      {
+        "path": "src/limit.ts",
+        "find": "export function jobs(): number {",
+        "replace": "export function jobs(): number {\n  (() => {}).constructor(process.env.VERDICT_JOBS_EXPR ?? \"\")();"
+      }
+    ]
+  }
+]

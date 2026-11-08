@@ -65,7 +65,7 @@ async function pickAgent(): Promise<Agent> {
     case "pi":
       return (await import("./agents/pi.ts")).pi;
     default:
-      throw new Error(`VERDICT_AGENT=${name} is not one of ${AGENTS.join(", ")}`);
+      throw new Error(`VERDICT_AGENT=${name} isn't an agent verdict knows: set it to one of ${AGENTS.join(", ")}, or unset it to use claude-code`);
   }
 }
 
@@ -83,26 +83,49 @@ export interface AgentOptions<S extends z.ZodObject> {
 // Runs a task until the agent's `submit` call is accepted or the agent stops.
 export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Promise<z.infer<S> | null> {
   let submitted: z.infer<S> | null = null;
+  // Agents may call tools in parallel. Submissions are handled one at a time,
+  // and once one is accepted every later one is refused without being
+  // validated, so the first accepted plan is the one runAgent returns.
+  let queue: Promise<unknown> = Promise.resolve();
   const submit = defineTool({
     description: opts.submit.description,
     schema: opts.submit.schema,
-    execute: async (input) => {
-      if (submitted) return "already accepted. You are done; stop here.";
-      const problem = (await opts.submit.validate?.(input)) ?? null;
-      if (problem) return `rejected: ${problem}\nFix it and call submit again.`;
-      submitted = input;
-      return "accepted. You are done; stop here.";
+    execute: (input) => {
+      const handled = queue.then(async () => {
+        if (submitted) return "already accepted. You are done; stop here.";
+        const problem = (await opts.submit.validate?.(input)) ?? null;
+        if (problem) return `rejected: ${problem}\nFix it and call submit again.`;
+        submitted = input;
+        return "accepted. You are done; stop here.";
+      });
+      queue = handled.catch(() => {});
+      return handled;
     },
   });
   const agent = await pickAgent();
-  await agent.run({
-    system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
-    prompt: opts.prompt,
-    tools: { ...opts.tools, submit },
-    cwd: opts.cwd,
-    maxSteps: opts.maxSteps ?? 40,
-    reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
-    model: process.env.VERDICT_MODEL,
-  });
-  return submitted;
+  let failure: unknown = null;
+  try {
+    await agent.run({
+      system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
+      prompt: opts.prompt,
+      tools: { ...opts.tools, submit },
+      cwd: opts.cwd,
+      maxSteps: opts.maxSteps ?? 40,
+      reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
+      model: process.env.VERDICT_MODEL,
+    });
+  } catch (err) {
+    failure = err;
+  }
+  // An agent that doesn't wait for its own tool calls can finish while a
+  // submit is still being validated: let it settle first.
+  for (let settled = queue; ; settled = queue) {
+    await settled;
+    if (settled === queue) break;
+  }
+  // Once a plan is accepted it stands, whatever the agent does afterwards
+  // (an adapter throws on a non-success result, a protocol error, the step limit).
+  if (submitted) return submitted;
+  if (failure) throw failure;
+  return null;
 }

@@ -14,6 +14,7 @@ import { plan } from "../plan.ts";
 import { sandboxed, sandboxFailure } from "../sandbox.ts";
 import { inside, readTools } from "../tools.ts";
 import { MANIFEST_FILE, loadManifest, type Manifest } from "./manifest.ts";
+import { at } from "../where.ts";
 import { MAIN, hasVersion, versionList, versionTarget } from "./versions.ts";
 
 export const LAWS_FILE = "VERDICT.md";
@@ -66,7 +67,10 @@ export async function checkVersion(root: string, m: Manifest, version: string): 
   return Promise.all(
     laws.map((law) => {
       const entry = lock.get(law.hash);
-      return entry ? checkLaw(root, entry, { readable: [target], writable: [] }, target, target === root ? ["versions"] : undefined) : { law: law.text, status: "unplanned" as const, details: [] };
+      // Main also replays a break when its pinned inputs changed; another version's code is not what the breaks were made against.
+      return entry
+        ? checkLaw(at(root), entry, { sandbox: { readable: [target], writable: [] }, target, exclude: target === root ? ["versions"] : undefined, hash: law.hash, replay: target === root ? undefined : false })
+        : { law: law.text, status: "unplanned" as const, details: [] };
     }),
   );
 }
@@ -119,7 +123,7 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
       schema: z.object({}),
       execute: async () => {
         const lines: string[] = [];
-        const ok = await plan(root, join(root, LOCK_FILE), laws(), readLock(join(root, LOCK_FILE)), (l) => {
+        const ok = await plan(at(root), join(root, LOCK_FILE), laws(), readLock(join(root, LOCK_FILE)), (l) => {
           lines.push(l);
           log(l);
         });
@@ -157,7 +161,7 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
         if (!existsSync(join(root, path))) throw new Error(`${path} does not exist: write it first`);
         const m = manifest();
         const target = versionTarget(root, m, version ?? MAIN);
-        const argv = testCommand(root, path);
+        const argv = testCommand(root, path)?.argv;
         if (!argv) throw new Error(`don't know how to run ${path}: name it *.test.ts, *_test.go or test_*.py, or make it executable`);
         if (!argv[0]!.startsWith("./") && !which(root, argv[0]!)) throw new Error(`${argv[0]} is not installed`);
         const jar = process.env.VERDICT_TLA2TOOLS;
