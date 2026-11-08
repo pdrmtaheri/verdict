@@ -52,8 +52,8 @@ const semgrep: Runner = async (ctx) => {
   if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
   const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"]);
   if (r.code === 0) return pass();
-  if (r.code === 1) return fail(tail(r.output));
-  return inconclusive(`semgrep exited ${r.code}\n${tail(r.output)}`);
+  if (r.code === 1) return fail(`${tail(r.output)}\nFix the code at the findings above, or edit the law in VERDICT.md if it no longer holds`);
+  return inconclusive(`semgrep exited ${r.code}: run \`semgrep --validate --config ${path}\` to see what's wrong with the rule, fix it or run \`verdict plan --again\`\n${tail(r.output)}`);
 };
 
 // A tool in node_modules/.bin from the law's directory up to the repo root,
@@ -151,8 +151,8 @@ const test: Runner = async (ctx) => {
     return pass();
   }
   // 77 is the automake "skipped" code: a precondition the test needs is missing.
-  if (r.code === SKIPPED) return inconclusive(`a precondition is missing\n${tail(r.output, 10)}`);
-  return fail(tail(r.output));
+  if (r.code === SKIPPED) return inconclusive(`${path} needs something that isn't here (a service, a credential, seed data; its output below says what): provide it, then run verdict check again\n${tail(r.output, 10)}`);
+  return fail(`${tail(r.output)}\nRun ${argv.join(" ")} to see the failure; fix the code, or edit the law in VERDICT.md if it no longer holds`);
 };
 
 export const SKIPPED = 77;
@@ -187,8 +187,8 @@ const tla: Runner = async (ctx) => {
   const env = { JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS ?? ""} -Djava.io.tmpdir=${meta}`.trim() };
   const r = await run(ctx, [...tlc, "-workers", "auto", "-metadir", meta, path], jar ? [jar] : [], env);
   if (r.code === 0) return pass();
-  if (r.code >= 10 && r.code <= 14) return fail(tail(r.output));
-  return inconclusive(`TLC exited ${r.code}\n${tail(r.output)}`);
+  if (r.code >= 10 && r.code <= 14) return fail(`${tail(r.output)}\nTLC found a behaviour that breaks the spec (trace above): fix the design in the code, or edit the law in VERDICT.md if it no longer holds`);
+  return inconclusive(`TLC exited ${r.code} without checking the spec (error below): fix ${path}, or run \`verdict plan --again\` to re-plan the law\n${tail(r.output)}`);
 };
 
 // ---------------------------------------------------------------- decision models (jev)
@@ -207,7 +207,7 @@ const decision: Runner = async (ctx) => {
   const { root, path } = ctx;
   const spec = DecisionFile.parse(JSON.parse(readFileSync(join(root, path), "utf8")));
   const state = await run(ctx, ["sh", "-c", spec.state_from]);
-  if (state.code !== 0) return inconclusive(`state_from exited ${state.code}\n${tail(state.output)}`);
+  if (state.code !== 0) return inconclusive(`state_from in ${path} exited ${state.code} (output below): fix the command, or run \`verdict plan --again\` to re-plan the law\n${tail(state.output)}`);
   if (state.output === "") return pass("state_from produced nothing to judge");
   const result = await experimental_decide({
     model: decisionModel(),
@@ -216,11 +216,11 @@ const decision: Runner = async (ctx) => {
   });
   const answer = result.answers.verdict;
   const p = answer.probabilities?.[answer.choice];
-  if (answer.choice === "inconclusive") return inconclusive("the decision model can't tell");
+  if (answer.choice === "inconclusive") return inconclusive(`the decision model can't tell from what state_from in ${path} prints: add an llm judge to this law (run \`verdict plan --again\`), or make state_from print what decides it`);
   if (p == null || p < spec.min_probability) {
-    return inconclusive(`the decision model leaned ${answer.choice} at p=${p?.toFixed(2) ?? "?"}, below ${spec.min_probability}`);
+    return inconclusive(`the decision model leaned ${answer.choice} at p=${p?.toFixed(2) ?? "?"}, below ${spec.min_probability}: add an llm judge to this law (run \`verdict plan --again\`) to settle it, or sharpen the criteria in ${path}`);
   }
-  return answer.choice === "pass" ? pass() : fail(`the decision model judged it false (p=${p.toFixed(2)})`);
+  return answer.choice === "pass" ? pass() : fail(`the decision model judged it false (p=${p.toFixed(2)}): run \`${spec.state_from}\` to see what it judged, then fix that, or edit the law in VERDICT.md if it no longer holds`);
 };
 
 // ---------------------------------------------------------------- LLM judge
@@ -247,7 +247,7 @@ const llm: Runner = async (ctx) => {
     cwd: root,
     submit: { description: "Report your verdict on the law.", schema: Verdict },
   });
-  if (!verdict) return inconclusive("the judge did not reach a verdict");
+  if (!verdict) return inconclusive("the judge stopped without a verdict: run verdict check again, or set a stronger VERDICT_MODEL or VERDICT_REASONING=high");
   return { status: verdict.status, message: verdict.reason };
 };
 
@@ -301,6 +301,7 @@ export async function runEnforcer(kind: string, ctx: Context): Promise<Result> {
   try {
     return await runner(ctx);
   } catch (err) {
-    return inconclusive(err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    return inconclusive(/: (run|set|install|add|fix|restore|edit|remove|check)\b/i.test(message) ? message : `${message}\n(${kind} enforcer ${ctx.path} crashed: fix the error above, or run \`verdict plan --again\` to re-plan the law)`);
   }
 }

@@ -136,7 +136,7 @@ class Connection {
       for await (const chunk of this.proc.stderr) this.stderr = (this.stderr + new TextDecoder().decode(chunk)).slice(-4000);
     })();
     void this.proc.exited.then((code) => {
-      for (const p of this.pending.values()) p.reject(new Error(`codex app-server exited (${code}): ${this.stderr.trim().split("\n").at(-1) ?? ""}`));
+      for (const p of this.pending.values()) p.reject(new Error(`codex app-server exited (${code}): ${this.stderr.trim().split("\n").at(-1) ?? ""}. Check that \`codex\` runs and is logged in (run \`codex login\`), then run verdict again`));
       this.pending.clear();
     });
   }
@@ -176,7 +176,7 @@ class Connection {
     } else if (typeof m.id === "number" && this.pending.has(m.id)) {
       const p = this.pending.get(m.id)!;
       this.pending.delete(m.id);
-      if (m.error) p.reject(new Error(`codex: ${m.error.message ?? `error ${m.error.code}`}`));
+      if (m.error) p.reject(new Error(`codex: ${m.error.message ?? `error ${m.error.code}`}. Update the Codex CLI if verdict's request isn't supported, or set VERDICT_AGENT=claude-code or pi`));
       else p.resolve(m.result);
     }
   }
@@ -219,7 +219,7 @@ export const codex: Agent = {
       },
       (m) => {
         if (m.method === "turn/completed") done();
-        if (m.method === "error" && m.params?.willRetry === false) failed(new Error(`codex: ${JSON.stringify(m.params.error ?? m.params)}`));
+        if (m.method === "error" && m.params?.willRetry === false) failed(new Error(`codex stopped: ${JSON.stringify(m.params.error ?? m.params)}. Run verdict again; if it keeps failing, check \`codex\` on its own or set VERDICT_AGENT=claude-code or pi`));
       },
       );
     } catch (err) {
