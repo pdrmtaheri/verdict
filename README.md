@@ -58,8 +58,14 @@ bun link verdict    # in the repo you want to check
 
    This plans every new or reworded law, re-proves existing ones against
    today's code (each enforcer must still fail on its recorded break), and
-   re-plans any that drifted. It writes `VERDICT.lock` and the enforcers and
-   breaks under `.verdict/`.
+   re-plans any that drifted or that passed when planned and fail now. It
+   writes `VERDICT.lock` and the enforcers and breaks under `.verdict/`. Laws
+   are planned in parallel (`VERDICT_JOBS`). To plan a law afresh even when it's
+   in sync, for example after installing TLC:
+
+   ```sh
+   verdict plan --again "charged twice"   # part of the law's text, or a hash prefix
+   ```
 
 3. **Review and commit** `VERDICT.md`, `VERDICT.lock` and `.verdict/` like any
    other code. The merge review is the approval; verdict has no approval step
@@ -77,6 +83,19 @@ bun link verdict    # in the repo you want to check
 
 Run `verdict plan` again whenever you edit a law or the code changes enough that
 an enforcer drifts. Editing a law's words marks it unplanned until you do.
+
+### Laws in subdirectories
+
+Any directory can have its own `VERDICT.md`. Its laws apply to that
+directory's subtree, and its `VERDICT.lock` and `.verdict/` sit beside it, so
+a module carries its laws when it moves. Like a test runner, `verdict check`
+and `verdict plan` run every `VERDICT.md` in the repo, or the ones under the
+paths you give:
+
+```sh
+verdict check packages/billing
+verdict plan packages/billing packages/auth
+```
 
 ## Enforcers
 
@@ -117,6 +136,8 @@ Environment variables:
 | `VERDICT_REASONING` | `low`, `medium` or `high` (default `high` to plan, `medium` to judge) |
 | `TYPESAFE_AI_API_KEY` | Key for decision-model (jev) enforcers |
 | `VERDICT_DECISION_MODEL` | Decision model to use (default `jev-1.14.0`) |
+| `VERDICT_JOBS` | How many laws to plan or check at once (default 4; each law being planned is one agent session) |
+| `VERDICT_TLA2TOOLS` | Path to `tla2tools.jar`, if TLC isn't on `PATH` as `tlc`. With TLC available, laws about concurrency, retries or crashes get a TLA+ model |
 | `VERDICT_SANDBOX` | Set to `off` only when verdict already runs inside a sandbox (macOS sandboxes don't nest) |
 
 ## Files
