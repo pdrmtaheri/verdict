@@ -10,9 +10,10 @@ import type { Enforcer } from "./lock.ts";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { withScratch } from "./scratch.ts";
 import { inside } from "./tools.ts";
+import { inCopy, type Where } from "./where.ts";
 
 export const Edit = z.object({
-  path: z.string().describe("A file of the system under check, relative to the repo root"),
+  path: z.string().describe("A file of the system under check, relative to the law's directory (../ reaches the rest of the repo)"),
   find: z.string().describe("Exact text that occurs once in the file"),
   replace: z.string(),
 });
@@ -43,12 +44,14 @@ export type Proof =
   | { kind: "unknown"; result: Result }; // the enforcer was inconclusive
 
 // Applies the break to a scratch copy and runs the enforcer there.
-export async function prove(root: string, law: string, enforcer: Enforcer, brk: Break): Promise<Proof> {
-  return withScratch(root, async (dir) => {
+export async function prove(w: Where, law: string, enforcer: Enforcer, brk: Break): Promise<Proof> {
+  return withScratch(w.repo, async (copy) => {
+    const c = inCopy(w, copy);
+    const dir = c.dir;
     for (const e of brk.edits) {
       let file: string;
       try {
-        file = inside(dir, e.path);
+        file = inside(dir, e.path, c.repo);
       } catch (err) {
         return { kind: "stale", reason: (err as Error).message };
       }
@@ -59,7 +62,7 @@ export async function prove(root: string, law: string, enforcer: Enforcer, brk: 
       if (count !== 1) return { kind: "stale", reason: `${e.path}: the text to replace occurs ${count} times, not once` };
       writeFileSync(file, text.replace(e.find, () => e.replace));
     }
-    const result = await runEnforcer(enforcer.kind, { root: dir, law, path: enforcer.path, sandbox: { readable: [root] } });
+    const result = await runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, sandbox: { readable: [w.repo] } });
     if (result.status === "fail") return { kind: "caught", result };
     if (result.status === "pass") return { kind: "missed", result };
     return { kind: "unknown", result };
@@ -68,8 +71,11 @@ export async function prove(root: string, law: string, enforcer: Enforcer, brk: 
 
 // Runs an enforcer the way planning does: on a scratch copy, in the sandbox.
 // The planner wrote it, so it never runs against the real repo unconfined.
-export async function runInScratch(root: string, law: string, enforcer: Enforcer): Promise<Result> {
-  return withScratch(root, (dir) => runEnforcer(enforcer.kind, { root: dir, law, path: enforcer.path, sandbox: { readable: [root] } }));
+export async function runInScratch(w: Where, law: string, enforcer: Enforcer): Promise<Result> {
+  return withScratch(w.repo, (copy) => {
+    const c = inCopy(w, copy);
+    return runEnforcer(enforcer.kind, { root: c.dir, repo: c.repo, law, path: enforcer.path, sandbox: { readable: [w.repo] } });
+  });
 }
 
 export function describe(p: Proof): Result {

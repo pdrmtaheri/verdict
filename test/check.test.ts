@@ -9,6 +9,7 @@ import { overrides } from "../src/models.ts";
 import { overrides as agents } from "../src/agent.ts";
 import { plan } from "../src/plan.ts";
 import { inside } from "../src/tools.ts";
+import { at } from "../src/where.ts";
 import { repo, scriptedAgent } from "./helpers.ts";
 
 afterEach(() => {
@@ -37,8 +38,8 @@ function decisionModel(choice: string, p: number): Experimental_DecisionModel & 
 
 test("an executable test passes or fails the law by exit code", async () => {
   const root = repo({ ".verdict/ok.sh": "#!/bin/sh\nexit 0\n", ".verdict/bad.sh": "#!/bin/sh\necho 'found 0.1 + 0.2'\nexit 1\n" }, [".verdict/ok.sh", ".verdict/bad.sh"]);
-  expect((await checkLaw(root, { law, enforcers: [{ kind: "test", path: ".verdict/ok.sh" }] })).status).toBe("pass");
-  const bad = await checkLaw(root, { law, enforcers: [{ kind: "test", path: ".verdict/bad.sh" }] });
+  expect((await checkLaw(at(root), { law, enforcers: [{ kind: "test", path: ".verdict/ok.sh" }] })).status).toBe("pass");
+  const bad = await checkLaw(at(root), { law, enforcers: [{ kind: "test", path: ".verdict/bad.sh" }] });
   expect(bad.status).toBe("fail");
   expect(bad.details[0]!.result.message).toContain("found 0.1 + 0.2");
 });
@@ -47,7 +48,7 @@ test("unplanned laws fail the check; inconclusive ones don't", async () => {
   const laws = parseLaws(`- ${law}\n- Another law.`);
   const lock: Lock = new Map([[laws[0]!.hash, { law, enforcers: [{ kind: "semgrep", path: ".verdict/r.yml" }] }]]);
   const root = repo({ ".verdict/r.yml": "rules: []\n" });
-  const reports = await check(root, laws, lock);
+  const reports = await check(at(root), laws, lock);
   expect(reports.map((r) => r.status)).toEqual([Bun.which("semgrep") ? reports[0]!.status : "inconclusive", "unplanned"]);
   expect(exitCode(reports)).toBe(1);
   expect(exitCode(reports.slice(0, 1).map((r) => ({ ...r, status: "inconclusive" as const })))).toBe(0);
@@ -55,7 +56,7 @@ test("unplanned laws fail the check; inconclusive ones don't", async () => {
 
 test("a missing enforcer file fails the law", async () => {
   const root = repo({});
-  const r = await checkLaw(root, { law, enforcers: [{ kind: "test", path: ".verdict/gone.sh" }] });
+  const r = await checkLaw(at(root), { law, enforcers: [{ kind: "test", path: ".verdict/gone.sh" }] });
   expect(r.status).toBe("fail");
 });
 
@@ -66,7 +67,7 @@ test("the LLM judge reads the repo and reports its verdict", async () => {
     { tool: "submit", input: { status: "fail", reason: "src/price.ts:1 stores 9.99 as a float" } },
   ]);
   agents.agent = model;
-  const r = await checkLaw(root, { law, enforcers: [{ kind: "llm", path: ".verdict/money.judge.md" }] });
+  const r = await checkLaw(at(root), { law, enforcers: [{ kind: "llm", path: ".verdict/money.judge.md" }] });
   expect(r.status).toBe("fail");
   expect(r.details[0]!.result.message).toContain("src/price.ts:1");
   expect(model.results.join("\n")).toContain("export const price = 9.99");
@@ -83,7 +84,7 @@ test("a confident decision model skips the LLM judge", async () => {
   overrides.decision = decisionModel("pass", 0.95);
   const judge = scriptedAgent([]);
   agents.agent = judge;
-  const r = await checkLaw(root, { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
+  const r = await checkLaw(at(root), { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
   expect(r.status).toBe("pass");
   expect(judge.prompts.length).toBe(0);
 });
@@ -92,7 +93,7 @@ test("an unsure decision model falls back to the LLM judge", async () => {
   const root = repo({ "msgs.txt": "Oops.", ".verdict/e.decision.json": decisionFile, ".verdict/e.judge.md": "" });
   overrides.decision = decisionModel("fail", 0.6);
   agents.agent = scriptedAgent([{ tool: "submit", input: { status: "fail", reason: "msgs.txt:1 gives no next step" } }]);
-  const r = await checkLaw(root, { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
+  const r = await checkLaw(at(root), { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }, { kind: "llm", path: ".verdict/e.judge.md" }] });
   expect(r.status).toBe("fail");
   expect(r.details.map((d) => d.kind)).toEqual(["llm"]);
 });
@@ -100,7 +101,7 @@ test("an unsure decision model falls back to the LLM judge", async () => {
 test("a decision model without a judge stays inconclusive when unsure", async () => {
   const root = repo({ "msgs.txt": "Oops.", ".verdict/e.decision.json": decisionFile });
   overrides.decision = decisionModel("fail", 0.6);
-  const r = await checkLaw(root, { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }] });
+  const r = await checkLaw(at(root), { law, enforcers: [{ kind: "decision", path: ".verdict/e.decision.json" }] });
   expect(r.status).toBe("inconclusive");
 });
 

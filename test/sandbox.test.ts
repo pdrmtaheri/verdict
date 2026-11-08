@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { runInScratch } from "../src/breaks.ts";
 import { bwrapArgs, macProfile } from "../src/sandbox.ts";
 import { checkGitArgs, inside, writeTools } from "../src/tools.ts";
+import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
 
 const live = process.env.VERDICT_SANDBOX !== "off";
@@ -36,7 +37,7 @@ test.skipIf(!live)("live: planner-written code can't write to the repo or see ve
     ".verdict/escape.sh": `#!/bin/sh\n# scope: probe\necho "$SECRET_FOR_TEST"\ntouch "${"$"}REPO/escaped" && exit 1\nexit 0\n`,
   }, [".verdict/escape.sh"]);
   process.env.SECRET_FOR_TEST = "hunter2";
-  const r = await runInScratch(root, "law", { kind: "test", path: ".verdict/escape.sh" });
+  const r = await runInScratch(at(root), "law", { kind: "test", path: ".verdict/escape.sh" });
   delete process.env.SECRET_FOR_TEST;
   expect(r.message).not.toContain("hunter2");
   expect(existsSync(join(root, "escaped"))).toBe(false);

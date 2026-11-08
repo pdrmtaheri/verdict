@@ -32,8 +32,24 @@ code.
 ```
 VERDICT.md      # human-written laws
 VERDICT.lock    # generated: law -> enforcers
-.verdict/       # generated enforcers and their tests/evals
+.verdict/       # generated enforcers, their tests/evals, and breaks/
 ```
+
+Any directory can have these three. A VERDICT.md's laws apply to its
+directory's subtree, and its VERDICT.lock and `.verdict/` sit beside it, so a
+module carries its laws when it moves, and its owners review them (CODEOWNERS
+works per directory). Paths in a lock are relative to its directory. There are
+no overrides: a child can't switch off a parent's law; the parent rewords it
+("except generated code").
+
+Like a test runner, `verdict check` and `verdict plan` with no paths run every
+VERDICT.md in the repo (found through git, so .gitignore applies); with paths,
+they run the VERDICT.md files in those subtrees. The planner for a nested law
+works from its directory: paths are relative to it, `../` reaches the rest of
+the repo for context (never above the repo root), and it writes only in that
+directory's `.verdict/`. Enforcers run in their law's directory; package and
+tool lookups (package.json, node_modules/.bin) walk up to the repo root, as
+monorepos expect.
 
 ### VERDICT.md
 
@@ -219,7 +235,7 @@ person to act on, and they never go in the lock:
 
 ## Implementation (v1)
 
-TypeScript on Bun. `bun src/cli.ts plan|check`.
+TypeScript on Bun. `bun src/cli.ts plan|check [path...]`.
 
 verdict runs its agents (the planner and the LLM judge) on a coding agent the
 user already has and is logged into, the way bb does: no model API keys and no

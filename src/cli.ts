@@ -1,19 +1,19 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { check, exitCode, format } from "./check.ts";
-import { parseLaws } from "./laws.ts";
-import { readLock } from "./lock.ts";
+import { check, exitCode, format, summarize, type LawReport } from "./check.ts";
+import { findSets, shown } from "./sets.ts";
 import { plan } from "./plan.ts";
 
-const USAGE = `usage: verdict <command>
+const USAGE = `usage: verdict <command> [path...]
 
   plan    sync the lock: plan new or reworded laws, re-prove planned ones on
           today's code (each enforcer must still fail on its break), and
           re-plan the ones that drifted
   check   run every law's enforcers; exit 1 if any law fails or isn't planned
 
-Laws live in VERDICT.md, the plan in VERDICT.lock, enforcers in .verdict/.
+Laws live in VERDICT.md files: any directory can have one, and its laws apply
+to that directory's subtree. Each keeps its plan in VERDICT.lock and its
+enforcers in .verdict/, beside it. With no paths, verdict runs every VERDICT.md
+in the repo; with paths, the ones in those subtrees.
 Agents: verdict runs its planner and judges on a coding agent you're logged into.
   VERDICT_AGENT      claude-code (default) | codex | pi
   VERDICT_MODEL      that agent's model name (e.g. haiku, gpt-6.1-terra,
@@ -23,24 +23,38 @@ Decision models (jev): TYPESAFE_AI_API_KEY; VERDICT_DECISION_MODEL
                      (default jev-1.14.0)`;
 
 async function main(argv: string[]): Promise<number> {
-  const [command] = argv;
-  const root = process.cwd();
-  const lawsFile = join(root, "VERDICT.md");
-  const lockFile = join(root, "VERDICT.lock");
+  const [command, ...paths] = argv;
   if (command !== "plan" && command !== "check") {
     console.log(USAGE);
     return command === undefined || command === "help" || command === "--help" ? 0 : 2;
   }
-  if (!existsSync(lawsFile)) {
-    console.error("no VERDICT.md in this directory");
+  const { repo, sets, unmatched } = await findSets(process.cwd(), paths);
+  for (const p of unmatched) {
+    console.error(`no VERDICT.md in ${p} or below: check the path, or create ${p}/VERDICT.md with one law per bullet`);
+  }
+  if (unmatched.length > 0) return 2;
+  if (sets.length === 0) {
+    console.error(`no VERDICT.md in ${repo}: create one (at the repo root, or in any directory) with one law per bullet`);
     return 2;
   }
-  const laws = parseLaws(readFileSync(lawsFile, "utf8"));
-  const lock = readLock(lockFile);
-  if (command === "plan") return (await plan(root, lockFile, laws, lock, console.log)) ? 0 : 1;
-  const reports = await check(root, laws, lock);
-  console.log(format(reports));
-  return exitCode(reports);
+  const many = sets.length > 1;
+  if (command === "plan") {
+    let ok = true;
+    for (const set of sets) {
+      if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
+      ok = (await plan(set, set.lockFile, set.laws, set.lock, console.log)) && ok;
+    }
+    return ok ? 0 : 1;
+  }
+  const all: LawReport[] = [];
+  for (const set of sets) {
+    const reports = await check(set, set.laws, set.lock);
+    if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
+    console.log(format(reports, !many));
+    all.push(...reports);
+  }
+  if (many) console.log(`\n${summarize(all)}`);
+  return exitCode(all);
 }
 
 process.exit(await main(process.argv.slice(2)));

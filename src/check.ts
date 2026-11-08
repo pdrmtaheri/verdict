@@ -1,6 +1,7 @@
 import { runEnforcer, scopeOf } from "./enforcers.ts";
 import type { Law } from "./laws.ts";
 import type { Lock, LockEntry } from "./lock.ts";
+import type { Where } from "./where.ts";
 import { combine, type Result, type Status } from "./result.ts";
 
 export interface LawReport {
@@ -11,11 +12,11 @@ export interface LawReport {
 
 // Runs a law's enforcers. An LLM judge next to a decision model is its
 // fallback: it runs only when the decision model is inconclusive.
-export async function checkLaw(root: string, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {
+export async function checkLaw(w: Where, entry: LockEntry, sandbox?: { readable: string[] }): Promise<LawReport> {
   const details: LawReport["details"] = [];
   const run = async (kind: string, path: string) => {
-    const result = await runEnforcer(kind, { root, law: entry.law, path, sandbox });
-    details.push({ kind, path, result, scope: scopeOf(root, path) });
+    const result = await runEnforcer(kind, { root: w.dir, repo: w.repo, law: entry.law, path, sandbox });
+    details.push({ kind, path, result, scope: scopeOf(w.dir, path) });
     return result;
   };
 
@@ -33,12 +34,12 @@ export async function checkLaw(root: string, entry: LockEntry, sandbox?: { reada
   return { law: entry.law, status: combine(details.map((d) => d.result)), details };
 }
 
-export async function check(root: string, laws: Law[], lock: Lock): Promise<LawReport[]> {
+export async function check(w: Where, laws: Law[], lock: Lock): Promise<LawReport[]> {
   return Promise.all(
     laws.map((law) => {
       const entry = lock.get(law.hash);
       if (!entry) return { law: law.text, status: "unplanned" as const, details: [] };
-      return checkLaw(root, entry);
+      return checkLaw(w, entry);
     }),
   );
 }
@@ -50,7 +51,7 @@ const LABEL: Record<LawReport["status"], string> = {
   unplanned: "NOT PLANNED ",
 };
 
-export function format(reports: LawReport[]): string {
+export function format(reports: LawReport[], summary = true): string {
   const out: string[] = [];
   for (const r of reports) {
     out.push(`${LABEL[r.status]}  ${r.law}`);
@@ -61,9 +62,13 @@ export function format(reports: LawReport[]): string {
       for (const line of d.result.message.split("\n")) if (line) out.push(`                ${line}`);
     }
   }
-  const count = (s: LawReport["status"]) => reports.filter((r) => r.status === s).length;
-  out.push("", `${count("pass")} pass, ${count("fail")} fail, ${count("inconclusive")} inconclusive, ${count("unplanned")} not planned`);
+  if (summary) out.push("", summarize(reports));
   return out.join("\n");
+}
+
+export function summarize(reports: LawReport[]): string {
+  const count = (s: LawReport["status"]) => reports.filter((r) => r.status === s).length;
+  return `${count("pass")} pass, ${count("fail")} fail, ${count("inconclusive")} inconclusive, ${count("unplanned")} not planned`;
 }
 
 export function exitCode(reports: LawReport[]): number {

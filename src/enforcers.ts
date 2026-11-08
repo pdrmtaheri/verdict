@@ -12,7 +12,8 @@ import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { readTools } from "./tools.ts";
 
 export interface Context {
-  root: string;
+  root: string; // the law's directory: enforcers run here
+  repo?: string; // the repository root (defaults to root): what may be read
   law: string;
   path: string; // enforcer file, relative to root
   // Set while planning: root is a scratch copy, and every program runs in the
@@ -23,7 +24,10 @@ export interface Context {
 // Runs a program for an enforcer, in the sandbox when the context asks for one.
 async function run(ctx: Context, argv: string[], extraReadable: string[] = []): Promise<ExecResult> {
   if (!ctx.sandbox) return exec(argv, { cwd: ctx.root });
-  const box = sandboxed(argv, { readable: [ctx.root, ...ctx.sandbox.readable, ...extraReadable], writable: [ctx.root], network: false }, ctx.root);
+  // Write access covers the whole (scratch) repo: a nested law's tests may
+  // build or cache at the repo root, as in a monorepo.
+  const repo = ctx.repo ?? ctx.root;
+  const box = sandboxed(argv, { readable: [repo, ...ctx.sandbox.readable, ...extraReadable], writable: [repo], network: false }, ctx.root);
   const r = await exec(box.argv, { cwd: ctx.root, env: box.env, cleanEnv: true });
   const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
   if (broken) {
@@ -40,7 +44,7 @@ type Runner = (ctx: Context) => Promise<Result>;
 
 const semgrep: Runner = async (ctx) => {
   const { root, path } = ctx;
-  const exe = which(root, "semgrep");
+  const exe = findBin(root, "semgrep", ctx.repo ?? root);
   if (!exe) return inconclusive("semgrep is not installed (https://semgrep.dev/docs/getting-started)");
   const r = await run(ctx, [exe, "scan", "--config", path, "--error", "--metrics", "off", "--quiet"]);
   if (r.code === 0) return pass();
@@ -48,19 +52,35 @@ const semgrep: Runner = async (ctx) => {
   return inconclusive(`semgrep exited ${r.code}\n${tail(r.output)}`);
 };
 
+// A tool in node_modules/.bin from the law's directory up to the repo root,
+// then on PATH.
+function findBin(root: string, bin: string, repo = root): string | null {
+  for (let dir = root; ; dir = dirname(dir)) {
+    const local = join(dir, "node_modules", ".bin", bin);
+    if (existsSync(local)) return local;
+    if (dir === repo || dir === dirname(dir)) return which(root, bin);
+  }
+}
+
 // ---------------------------------------------------------------- tests
 // The runner is inferred from the file name and the repo's own tooling.
 
-function deps(root: string): Record<string, string> {
-  const pkg = join(root, "package.json");
-  if (!existsSync(pkg)) return {};
-  const json = JSON.parse(readFileSync(pkg, "utf8"));
-  return { ...json.dependencies, ...json.devDependencies };
+// The nearest package.json from the law's directory up to the repo root.
+function deps(root: string, repo = root): Record<string, string> {
+  for (let dir = root; ; dir = dirname(dir)) {
+    const pkg = join(dir, "package.json");
+    if (existsSync(pkg)) {
+      const json = JSON.parse(readFileSync(pkg, "utf8"));
+      return { ...json.dependencies, ...json.devDependencies };
+    }
+    if (dir === repo || dir === dirname(dir)) return {};
+  }
 }
 
-export function testCommand(root: string, file: string): string[] | null {
+export function testCommand(root: string, file: string, repo = root): string[] | null {
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
-    const d = deps(root);
+    const d = deps(root, repo);
+    const which = (r: string, bin: string) => findBin(r, bin, repo);
     if (d["@playwright/test"] && /\.spec\./.test(file)) return [which(root, "playwright") ?? "playwright", "test", file];
     if (d.vitest) return [which(root, "vitest") ?? "vitest", "run", file];
     if (d.jest) return [which(root, "jest") ?? "jest", file];
@@ -74,9 +94,9 @@ export function testCommand(root: string, file: string): string[] | null {
 
 const test: Runner = async (ctx) => {
   const { root, path } = ctx;
-  const argv = testCommand(root, path);
+  const argv = testCommand(root, path, ctx.repo ?? root);
   if (!argv) return inconclusive(`don't know how to run ${path}`);
-  if (!argv[0]!.startsWith("./") && !which(root, argv[0]!)) return inconclusive(`${argv[0]} is not installed`);
+  if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) return inconclusive(`${argv[0]} is not installed`);
   const r = await run(ctx, argv);
   if (r.code === 0) return pass();
   // 77 is the automake "skipped" code: a precondition the test needs is missing.
@@ -148,12 +168,13 @@ const Verdict = z.object({
   reason: z.string().describe("One or two sentences. For fail, name file:line."),
 });
 
-const llm: Runner = async ({ root, law, path }) => {
+const llm: Runner = async (ctx) => {
+  const { root, law, path } = ctx;
   const hints = readFileSync(join(root, path), "utf8");
   const verdict = await runAgent({
     system: JUDGE_SYSTEM,
     prompt: `Law: ${law}\n\nNotes from the plan:\n${hints}`,
-    tools: readTools(root),
+    tools: readTools(root, ctx.repo ?? root),
     cwd: root,
     submit: { description: "Report your verdict on the law.", schema: Verdict },
   });

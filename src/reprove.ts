@@ -5,6 +5,7 @@
 import { describe, prove, readBreaks } from "./breaks.ts";
 import { checkLaw } from "./check.ts";
 import { withScratch } from "./scratch.ts";
+import { inCopy, type Where } from "./where.ts";
 import type { Law } from "./laws.ts";
 import type { Lock } from "./lock.ts";
 import type { Result } from "./result.ts";
@@ -17,12 +18,12 @@ export interface Reproof {
   findings: { path: string; result: Result }[];
 }
 
-export async function reproveLaw(root: string, law: Law, lock: Lock): Promise<Reproof> {
+export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproof> {
   const entry = lock.get(law.hash);
   if (!entry) return { law, outcome: "not planned", findings: [] };
   // plan runs everything in a sandboxed scratch copy, even enforcers already in the lock.
-  const today = await withScratch(root, (dir) => checkLaw(dir, entry, { readable: [root] }));
-  const breaks = readBreaks(root, law.hash);
+  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), entry, { readable: [w.repo] }));
+  const breaks = readBreaks(w.dir, law.hash);
   const findings: Reproof["findings"] = [];
   let drift = false;
   let blocked = false;
@@ -44,7 +45,7 @@ export async function reproveLaw(root: string, law: Law, lock: Lock): Promise<Re
       findings.push({ path: e.path, result: { status: "inconclusive", message: "passes, but has never been seen to fail (no break)" } });
       continue;
     }
-    const proof = await prove(root, law.text, e, brk);
+    const proof = await prove(w, law.text, e, brk);
     if (proof.kind === "stale" || proof.kind === "missed") drift = true;
     if (proof.kind === "unknown") blocked = true;
     findings.push({ path: e.path, result: describe(proof) });

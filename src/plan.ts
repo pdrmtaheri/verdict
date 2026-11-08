@@ -10,6 +10,7 @@ import { writeLock, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
 import { reproveLaw, type Reproof } from "./reprove.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
+import { label, type Where } from "./where.ts";
 
 export const OUT_DIR = ".verdict";
 
@@ -141,18 +142,18 @@ function show(r: Result): string {
 
 // Checks a submission the way verdict will use it. Returns a reason to
 // reject it, or notes for the person reviewing the plan.
-export async function validate(root: string, law: Law, sub: Submission): Promise<{ problem: string | null; notes: string[] }> {
+export async function validate(w: Where, law: Law, sub: Submission): Promise<{ problem: string | null; notes: string[] }> {
   const notes: string[] = [];
   let failsToday = false;
   for (const e of sub.enforcers) {
     try {
-      inside(root, e.path, join(root, OUT_DIR));
+      inside(w.dir, e.path, join(w.dir, OUT_DIR));
     } catch (err) {
       return { problem: (err as Error).message, notes };
     }
-    if (!existsSync(join(root, e.path))) return { problem: `${e.path} was not written`, notes };
-    if (!scopeOf(root, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
-    const today = await runInScratch(root, law.text, e);
+    if (!existsSync(join(w.dir, e.path))) return { problem: `${e.path} was not written`, notes };
+    if (!scopeOf(w.dir, e.path)) return { problem: `${e.path} has no "scope:" line`, notes };
+    const today = await runInScratch(w, law.text, e);
     if (today.status === "fail") {
       failsToday = true;
       notes.push(`${e.path} fails on today's code`);
@@ -164,7 +165,7 @@ export async function validate(root: string, law: Law, sub: Submission): Promise
     }
     const brk = sub.breaks.find((b) => b.enforcer === e.path);
     if (!brk) return { problem: `${e.path} passes today; submit a break that makes it fail`, notes };
-    const proof = await prove(root, law.text, e, brk);
+    const proof = await prove(w, law.text, e, brk);
     if (proof.kind === "missed") return { problem: `${e.path} still passes with the break "${brk.description}". Make the enforcer see it, or pick a break that really violates the law.`, notes };
     if (proof.kind === "stale") return { problem: `the break for ${e.path} doesn't apply: ${proof.reason}`, notes };
     if (proof.kind === "unknown") notes.push(`${e.path} was inconclusive on its break (${proof.result.message.split("\n")[0]})`);
@@ -174,18 +175,18 @@ export async function validate(root: string, law: Law, sub: Submission): Promise
   return { problem: null, notes };
 }
 
-function planTools(root: string, law: Law) {
+function planTools(w: Where, law: Law) {
   return {
     run_enforcer: defineTool({
       description: "Run one enforcer on a sandboxed scratch copy of the repo, the way verdict validates your plan.",
       schema: EnforcerRef,
-      execute: async (e) => show(await runInScratch(root, law.text, e)),
+      execute: async (e) => show(await runInScratch(w, law.text, e)),
     }),
     try_break: defineTool({
       description: "Apply edits to a scratch copy of the repo and run one enforcer there. The repo is never changed.",
       schema: z.object({ enforcer: EnforcerRef, edits: z.array(Edit).min(1) }),
       execute: async ({ enforcer, edits }) => {
-        const p = await prove(root, law.text, enforcer, { enforcer: enforcer.path, description: "trial", edits });
+        const p = await prove(w, law.text, enforcer, { enforcer: enforcer.path, description: "trial", edits });
         if (p.kind === "stale") return `the edits don't apply: ${p.reason}`;
         return `${p.kind === "caught" ? "caught" : p.kind === "missed" ? "missed: the enforcer passed" : "inconclusive"} (${show(p.result)})`;
       },
@@ -193,19 +194,25 @@ function planTools(root: string, law: Law) {
   };
 }
 
-export async function planLaw(root: string, law: Law, context = ""): Promise<PlanOutcome> {
-  const installed = PROBE.filter((t) => which(root, t));
+export async function planLaw(w: Where, law: Law, context = ""): Promise<PlanOutcome> {
+  const installed = PROBE.filter((t) => which(w.dir, t));
+  const where =
+    w.dir === w.repo
+      ? "The law is declared in VERDICT.md at the repo root and applies to the whole repo."
+      : `The law is declared in ${label(w)}/VERDICT.md and applies to that directory's subtree only. ` +
+        `Paths are relative to ${label(w)}/; ../ reaches the rest of the repo for context. ` +
+        `Write enforcers in ${label(w)}/${OUT_DIR}/ and scope them to that subtree.`;
   let notes: string[] = [];
   const submission = await runAgent({
     system: SYSTEM,
-    prompt: `Law: ${law.text}\n\nInstalled tools: ${installed.join(", ") || "none"}${context ? `\n\n${context}` : ""}`,
-    tools: { ...readTools(root), ...writeTools(root, join(root, OUT_DIR)), ...planTools(root, law) },
-    cwd: root,
+    prompt: `Law: ${law.text}\n\n${where}\n\nInstalled tools: ${installed.join(", ") || "none"}${context ? `\n\n${context}` : ""}`,
+    tools: { ...readTools(w.dir, w.repo), ...writeTools(w.dir, join(w.dir, OUT_DIR), w.repo), ...planTools(w, law) },
+    cwd: w.dir,
     submit: {
       description: "Submit the enforcers for this law, with a break for each one that passes today.",
       schema: Submission,
       validate: async (sub) => {
-        const v = await validate(root, law, sub);
+        const v = await validate(w, law, sub);
         notes = v.notes;
         return v.problem;
       },
@@ -234,8 +241,8 @@ export function logOutcome(o: PlanOutcome, log: (line: string) => void): void {
 
 // The commit at which a law's enforcers were last proven, read from git
 // rather than stored: the last commit that touched its breaks file.
-async function lastProven(root: string, hash: string): Promise<string | null> {
-  const r = await exec(["git", "log", "-1", "--format=%h", "--", breaksFile(root, hash)], { cwd: root });
+async function lastProven(w: Where, hash: string): Promise<string | null> {
+  const r = await exec(["git", "log", "-1", "--format=%h", "--", breaksFile(w.dir, hash)], { cwd: w.dir });
   return r.code === 0 && r.output ? r.output : null;
 }
 
@@ -255,8 +262,8 @@ suggestions:
   in finding, naming the commit that introduced it if you can find it.
 Never weaken an enforcer to make it pass.`;
 
-async function triageContext(root: string, law: Law, lock: Lock, r: Reproof): Promise<string> {
-  const since = await lastProven(root, law.hash);
+async function triageContext(w: Where, law: Law, lock: Lock, r: Reproof): Promise<string> {
+  const since = await lastProven(w, law.hash);
   return [
     TRIAGE,
     `Current enforcers:\n${lock.get(law.hash)!.enforcers.map((e) => `- ${e.kind}: ${e.path}`).join("\n")}`,
@@ -281,7 +288,7 @@ function logReproof(r: Reproof, log: (line: string) => void): void {
 // today are reported, not re-planned: that is a finding, not drift.
 // Entries for removed laws are dropped.
 export async function plan(
-  root: string,
+  w: Where,
   lockFile: string,
   laws: Law[],
   lock: Lock,
@@ -292,17 +299,17 @@ export async function plan(
   for (const law of laws) {
     let context = "";
     if (lock.has(law.hash)) {
-      const r = await reproveLaw(root, law, lock);
+      const r = await reproveLaw(w, law, lock);
       logReproof(r, log);
       if (r.outcome !== "drift") continue;
-      context = await triageContext(root, law, lock, r);
+      context = await triageContext(w, law, lock, r);
       log(`  re-planning`);
     } else {
       log(`planning: ${law.text}`);
     }
     let outcome: PlanOutcome;
     try {
-      outcome = await planLaw(root, law, context);
+      outcome = await planLaw(w, law, context);
     } catch (err) {
       // e.g. a missing API key: the same error would repeat for every law.
       log(`  error: ${err instanceof Error ? err.message : String(err)}`);
@@ -314,7 +321,7 @@ export async function plan(
       continue;
     }
     lock.set(law.hash, outcome.entry);
-    writeBreaks(root, law.hash, outcome.breaks);
+    writeBreaks(w.dir, law.hash, outcome.breaks);
     writeLock(lockFile, lock, laws);
   }
   return ok;
