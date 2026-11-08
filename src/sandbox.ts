@@ -23,8 +23,8 @@ export interface Box {
   home?: string; // HOME inside the sandbox; a fresh empty directory by default
   env?: Record<string, string>;
   // Deny reads everywhere except the system, installed tools and the paths
-  // given, not only under the user's home (macOS; Linux hides home, /tmp and
-  // /run). For a program that reads files on its own, like Codex's shell.
+  // given, not only under the user's home. For a program that reads files on
+  // its own, like Codex's shell.
   readsListedOnly?: boolean;
 }
 
@@ -100,19 +100,35 @@ export function macProfile(box: Box, home: string): string {
     box.readsListedOnly ? '(deny file-read* (subpath "/"))' : `(deny file-read* (subpath ${q(home)}))`,
     ...(box.readsListedOnly ? ['(allow file-read* (literal "/"))', ...[...SYSTEM_READS, ...installRoots(home)].map((r) => `(allow file-read* (subpath ${q(r)}))`)] : []),
     ...[...box.readable, ...box.writable, ...toolRoots(home)].map((r) => `(allow file-read* (subpath ${q(real(r))}))`),
+    // /System/Volumes/Data is the data volume (/Users, /opt, /private…) by
+    // another name: what /System allows above must not reach it that way.
+    ...(box.readsListedOnly ? ['(deny file-read* (subpath "/System/Volumes/Data"))'] : []),
     "(allow file-read-metadata)",
   );
   return rules.join("\n");
 }
 
+// The Linux equivalent of SYSTEM_READS: libraries, binaries and settings.
+const LINUX_SYSTEM = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/nix/store"];
+
 export function bwrapArgs(box: Box, home: string, cwd: string): string[] {
   // /run, /var/run and /tmp hold other programs' sockets (Docker, D-Bus, ssh
   // agents, X11); they're hidden, then only the given paths are bound back.
-  const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/tmp", "--tmpfs", home];
-  // /var/run is usually a link to /run; where it's a real directory, hide it too.
-  if (existsSync("/var/run") && real("/var/run") !== "/run") args.push("--tmpfs", "/var/run");
-  const hidden = [home, "/tmp", "/run", "/var/run"];
-  for (const r of [...box.readable, ...toolRoots(home)]) if (hidden.some((h) => under(real(r), h))) args.push("--ro-bind", real(r), real(r));
+  const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc"];
+  if (box.readsListedOnly) {
+    // Start from an empty root and bind back only the system, installed tools
+    // and the paths given.
+    for (const d of LINUX_SYSTEM) args.push("--ro-bind-try", d, d);
+    for (const r of installRoots(home)) if (!LINUX_SYSTEM.some((d) => under(r, d))) args.push("--ro-bind-try", r, r);
+    args.push("--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/tmp", "--tmpfs", home);
+    for (const r of [...box.readable, ...toolRoots(home)]) args.push("--ro-bind", real(r), real(r));
+  } else {
+    args.push("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/tmp", "--tmpfs", home);
+    // /var/run is usually a link to /run; where it's a real directory, hide it too.
+    if (existsSync("/var/run") && real("/var/run") !== "/run") args.push("--tmpfs", "/var/run");
+    const hidden = [home, "/tmp", "/run", "/var/run"];
+    for (const r of [...box.readable, ...toolRoots(home)]) if (hidden.some((h) => under(real(r), h))) args.push("--ro-bind", real(r), real(r));
+  }
   for (const w of box.writable) args.push("--bind", real(w), real(w));
   if (!box.network) args.push("--unshare-net");
   args.push("--chdir", cwd);

@@ -31,6 +31,16 @@ test("a box with listed reads only denies reads everywhere but the system, tools
   expect(p.indexOf('(deny file-read* (subpath "/"))')).toBeLessThan(p.indexOf('(allow file-read* (subpath "/r"))'));
   expect(p).not.toContain('(allow file-read* (subpath "/Users"))');
   expect(macProfile({ readable: [], writable: [], network: false }, "/Users/me")).not.toContain('(deny file-read* (subpath "/"))');
+  expect(p.lastIndexOf('(deny file-read* (subpath "/System/Volumes/Data"))')).toBeGreaterThan(p.indexOf('(allow file-read* (subpath "/System"))'));
+});
+
+test("on Linux, a box with listed reads only starts from an empty root", () => {
+  const a = bwrapArgs({ readable: ["/srv/repo"], writable: ["/w"], network: false, readsListedOnly: true }, "/home/me", "/srv/repo");
+  expect(a.join(" ")).not.toContain("--ro-bind / /");
+  expect(a.join(" ")).toContain("--ro-bind-try /usr /usr");
+  expect(a.join(" ")).toContain("--ro-bind /srv/repo /srv/repo");
+  expect(a.join(" ")).toContain("--bind /w /w");
+  expect(bwrapArgs({ readable: [], writable: [], network: false }, "/home/me", "/").join(" ")).toContain("--ro-bind / /");
 });
 
 test("the bubblewrap arguments hide home, bind only what's given, and cut the network", () => {

@@ -371,8 +371,10 @@ Everything it can cause to run is therefore confined:
   which a person reviews. On macOS, Codex's sandbox also denies reads outside
   the system, installed tools, the repo, and Codex's install and home: other
   users' files, other volumes and the rest of the user's disk are out of
-  reach, not only the home directory. On Linux the sandbox hides home, /tmp
-  and /run, but the rest of the filesystem is readable. With
+  reach, not only the home directory, including through the data volume's
+  other name (/System/Volumes/Data). On Linux, Codex's sandbox starts from an
+  empty root and binds back only /usr, /bin, /lib, /etc and the like, tool
+  installs on PATH, and the paths it needs (untested on Linux so far). With
   `VERDICT_SANDBOX=off` verdict refuses to start Codex, since nothing would
   confine its shell.
 
