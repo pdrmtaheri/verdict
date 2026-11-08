@@ -85,12 +85,20 @@ function helpersOf(w: Where, file: string): string[] {
   const out: string[] = [];
   for (const f of readdirSync(dir, { recursive: true }) as string[]) {
     const abs = join(dir, f);
-    if (abs === file || f.startsWith("breaks/") || !statSync(abs).isFile()) continue;
+    if (abs === file || f.startsWith("breaks/") || !isFile(abs)) continue; // a dangling link isn't a helper
     const name = basename(f);
     const stem = name.replace(/\.[cm]?[jt]sx?$/, "");
     if (text.includes(name) || (stem !== name && new RegExp(`["'/]${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(text))) out.push(abs);
   }
   return out;
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function nearest(from: string, name: string, repo: string): string | null {

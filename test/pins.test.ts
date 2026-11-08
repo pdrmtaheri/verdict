@@ -120,3 +120,10 @@ test("helpers an enforcer in .verdict/ names are among its inputs", () => {
   });
   expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).sort()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
 });
+
+test("a dangling link in .verdict/ doesn't break pinning", async () => {
+  const { symlinkSync } = await import("node:fs");
+  const root = repo({ ".verdict/a.sh": "# scope: x\n" });
+  symlinkSync(join(root, "nowhere"), join(root, ".verdict/dangling-link"));
+  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.sh" }))).toEqual([".verdict/a.sh"]);
+});
