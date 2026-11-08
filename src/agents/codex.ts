@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { callTool, type Agent, type AgentTask } from "../agent.ts";
-import { startEgress } from "../egress.ts";
+import { startEgress } from "./egress.ts";
 import { sandboxed } from "../sandbox.ts";
 
 // Where Codex may connect: the ChatGPT backend it uses with a ChatGPT login,

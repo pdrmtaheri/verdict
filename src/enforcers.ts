@@ -96,7 +96,9 @@ const test: Runner = async (ctx) => {
   const { root, path } = ctx;
   const argv = testCommand(root, path, ctx.repo ?? root);
   if (!argv) return inconclusive(`don't know how to run ${path}`);
-  if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) return inconclusive(`${argv[0]} is not installed`);
+  if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) {
+    return inconclusive(`${argv[0]} is not installed: install it (or add it to the project's dev dependencies), then run verdict check again`);
+  }
   const r = await run(ctx, argv);
   if (r.code === 0) return pass();
   // 77 is the automake "skipped" code: a precondition the test needs is missing.
@@ -223,8 +225,10 @@ export const KINDS = Object.keys(RUNNERS);
 
 export async function runEnforcer(kind: string, ctx: Context): Promise<Result> {
   const runner = RUNNERS[kind];
-  if (!runner) return inconclusive(`unknown enforcer kind "${kind}"`);
-  if (!existsSync(join(ctx.root, ctx.path))) return fail(`${ctx.path} is missing`);
+  // The planner only writes known kinds, so this is a hand edit or a typo:
+  // a law that can't be checked is not a pass.
+  if (!runner) return fail(`unknown enforcer kind "${kind}" in VERDICT.lock: fix it to one of ${KINDS.join(", ")}, or delete the entry and run \`verdict plan\``);
+  if (!existsSync(join(ctx.root, ctx.path))) return fail(`${ctx.path} is missing: restore it from git, or run \`verdict plan\` to plan the law again`);
   try {
     return await runner(ctx);
   } catch (err) {

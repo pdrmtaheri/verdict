@@ -219,7 +219,7 @@ export function writeTools(root: string, outDir: string, repo = root, claim: (ab
           return exec(box.argv, { cwd: dir, env: box.env, cleanEnv: true, timeoutMs: 5 * 60_000 });
         });
         const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
-        if (broken) throw new Error(`couldn't start verdict's sandbox (${broken})`);
+        if (broken) throw new Error(`couldn't start verdict's sandbox (${broken}): if verdict already runs in a sandbox, set VERDICT_SANDBOX=off`);
         return tail(`exit ${r.code}\n${r.output}`, 200);
       },
     }),

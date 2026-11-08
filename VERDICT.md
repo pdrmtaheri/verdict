@@ -1,9 +1,10 @@
 # verdict's own laws
 
-- Only src/agents/ and src/models.ts talk to a coding agent or a model
-  provider; everything else goes through runAgent() or decisionModel().
-- An agent's file tools never read or write outside the repository, and the
-  planner never writes outside .verdict/.
+- Within src/, only src/agents/ and src/models.ts talk to a coding agent or a
+  model provider; the rest of src/ goes through runAgent() or decisionModel().
+- An agent's file tools never read or write outside the repository; the
+  planner never writes to the repository outside .verdict/, and anything it
+  runs can write only to a scratch copy.
 - `verdict check` exits 0 only when no law fails and every law is planned.
 - Error messages tell the user what to do next.
 - Once the planner's submission is accepted, nothing the agent does afterwards

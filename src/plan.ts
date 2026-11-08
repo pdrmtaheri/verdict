@@ -222,7 +222,7 @@ export async function planLaw(w: Where, law: Law, context = "", claim?: (abs: st
     maxSteps: 100,
     reasoning: "high",
   });
-  if (!submission) return { law, breaks: [], notes, suggestions: [], error: "the planner did not submit a plan that verdict could accept" };
+  if (!submission) return { law, breaks: [], notes, suggestions: [], error: "the planner stopped without a plan verdict could accept: read the rejections above, then run `verdict plan` again (a stronger VERDICT_MODEL or higher VERDICT_REASONING may help)" };
   return {
     law,
     entry: { law: law.text, enforcers: submission.enforcers },

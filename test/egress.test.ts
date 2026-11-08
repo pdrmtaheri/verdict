@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { join } from "node:path";
-import { startEgress } from "../src/egress.ts";
+import { startEgress } from "../src/agents/egress.ts";
 import { macProfile } from "../src/sandbox.ts";
 
 const dir = () => mkdtempSync(join(process.env.TMPDIR!, "verdict-egress-"));

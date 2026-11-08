@@ -40,7 +40,8 @@ export async function check(w: Where, laws: Law[], lock: Lock, limit: Limit = ma
   return Promise.all(
     laws.map((law) => {
       const entry = lock.get(law.hash);
-      if (!entry) return { law: law.text, status: "unplanned" as const, details: [] };
+      // An entry with no enforcers checks nothing, so the law isn't planned.
+      if (!entry || entry.enforcers.length === 0) return { law: law.text, status: "unplanned" as const, details: [] };
       return limit(() => checkLaw(w, entry));
     }),
   );
