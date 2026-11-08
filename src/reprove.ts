@@ -7,7 +7,8 @@ import { checkLaw } from "./check.ts";
 import { withScratch } from "./scratch.ts";
 import { inCopy, type Where } from "./where.ts";
 import type { Law } from "./laws.ts";
-import type { Lock } from "./lock.ts";
+import type { Lock, LockEntry } from "./lock.ts";
+import { inputsOf } from "./pins.ts";
 import type { Result } from "./result.ts";
 
 // "fails today": it failed when it was planned too (no break), a known finding.
@@ -19,13 +20,16 @@ export interface Reproof {
   law: Law;
   outcome: Outcome;
   findings: { path: string; result: Result }[];
+  // The lock entry with each enforcer's inputs recorded as they are now,
+  // for the enforcers this re-proof settled (caught its break, or fails).
+  pinned: LockEntry;
 }
 
 export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproof> {
   const entry = lock.get(law.hash);
-  if (!entry) return { law, outcome: "not planned", findings: [] };
+  if (!entry) return { law, outcome: "not planned", findings: [], pinned: { law: law.text, enforcers: [] } };
   // plan runs everything in a sandboxed scratch copy, even enforcers already in the lock.
-  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), entry, { readable: [w.repo] }));
+  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), entry, { sandbox: { readable: [w.repo] }, replay: false }));
   const breaks = readBreaks(w.dir, law.hash);
   const findings: Reproof["findings"] = [];
   let drift = false;
@@ -57,6 +61,8 @@ export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproo
   }
   const outcome: Outcome =
     today.status === "fail" ? (newlyFailing ? "newly failing" : "fails today") : drift ? "drift" : blocked ? "blocked" : "in sync";
-  return { law, outcome, findings };
+  const settled = (path: string) => findings.find((f) => f.path === path)?.result.status !== "inconclusive";
+  const pinned = { ...entry, enforcers: entry.enforcers.map((e) => (settled(e.path) ? { ...e, inputs: inputsOf(w, e) } : e)) };
+  return { law, outcome, findings, pinned };
 }
 

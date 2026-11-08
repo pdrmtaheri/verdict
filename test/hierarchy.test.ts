@@ -94,7 +94,7 @@ test("a nested law is planned into its own directory, reading up to the repo roo
   expect(agent.results[1]).toContain("outside");
   expect(agent.results[2]).toContain("packages/a/marker.txt".replace("packages/a/", "../a/"));
   expect(existsSync(join(b, ".verdict/shared.sh"))).toBe(true);
-  expect(readLock(join(b, "VERDICT.lock")).get(laws[0]!.hash)?.enforcers).toEqual([{ kind: "test", path: ".verdict/shared.sh" }]);
+  expect(readLock(join(b, "VERDICT.lock")).get(laws[0]!.hash)?.enforcers).toMatchObject([{ kind: "test", path: ".verdict/shared.sh" }]);
   expect(log.join("\n")).toContain("caught its break");
   expect(readFileSync(join(root, "shared.txt"), "utf8")).toBe("shared\n"); // the break ran on a copy
 });

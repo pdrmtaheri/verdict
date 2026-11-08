@@ -8,6 +8,7 @@ import { exec, which } from "./exec.ts";
 import type { Law } from "./laws.ts";
 import { writeLock, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
 import type { Result } from "./result.ts";
+import { inputsOf } from "./pins.ts";
 import { reproveLaw, type Reproof } from "./reprove.ts";
 import { inside, readTools, writeTools } from "./tools.ts";
 import { label, type Where } from "./where.ts";
@@ -367,7 +368,14 @@ export async function plan(
       } else if (lock.has(law.hash)) {
         const r = await reproveLaw(w, law, lock);
         logReproof(r, say);
-        if (r.outcome !== "drift" && r.outcome !== "newly failing") return;
+        if (r.outcome !== "drift" && r.outcome !== "newly failing") {
+          // Nothing to re-plan; record what each enforcer was just proven against.
+          if (JSON.stringify(r.pinned) !== JSON.stringify(lock.get(law.hash))) {
+            lock.set(law.hash, r.pinned);
+            writeLock(lockFile, lock, laws);
+          }
+          return;
+        }
         context = await triageContext(w, law, lock, r);
         say(`  re-planning`);
       } else {
@@ -389,7 +397,7 @@ export async function plan(
         ok = false;
         return;
       }
-      lock.set(law.hash, outcome.entry);
+      lock.set(law.hash, { ...outcome.entry, enforcers: outcome.entry.enforcers.map((e) => ({ ...e, inputs: inputsOf(w, e) })) });
       writeBreaks(w.dir, law.hash, outcome.breaks);
       writeLock(lockFile, lock, laws);
     } finally {

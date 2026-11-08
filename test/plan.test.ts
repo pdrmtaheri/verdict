@@ -45,7 +45,7 @@ test("plan only accepts an enforcer once it has been seen to fail", async () => 
   expect(said).toContain("passes today; submit a break");
   expect(said).toContain("still passes with the break");
   expect(log).toContain("caught its break: store dollars");
-  expect(readLock(join(root, "VERDICT.lock")).get(law!.hash)?.enforcers).toEqual([enforcer]);
+  expect(readLock(join(root, "VERDICT.lock")).get(law!.hash)?.enforcers).toMatchObject([enforcer]);
   expect(readBreaks(root, law!.hash)).toEqual([goodBreak]);
   expect(readFileSync(join(root, "src/money.ts"), "utf8")).toContain("cents"); // the repo was never broken
 });
