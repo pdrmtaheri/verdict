@@ -22,6 +22,28 @@ export interface Box {
   localhostPorts?: number[];
   home?: string; // HOME inside the sandbox; a fresh empty directory by default
   env?: Record<string, string>;
+  // Deny reads everywhere except the system, installed tools and the paths
+  // given, not only under the user's home (macOS; Linux hides home, /tmp and
+  // /run). For a program that reads files on its own, like Codex's shell.
+  readsListedOnly?: boolean;
+}
+
+// What any program needs to read to start: the OS, its libraries, settings
+// and certificates. Not users' files, other volumes or other programs' data.
+const SYSTEM_READS = ["/System", "/usr", "/bin", "/sbin", "/Library/Apple", "/Library/Preferences", "/Library/Keychains", "/private/etc", "/private/var/db", "/dev"];
+
+// Where tools on PATH outside the user's home are installed (/opt/homebrew,
+// /usr/local…): each PATH entry, its real directory and that directory's prefix.
+export function installRoots(home = real(homedir())): string[] {
+  const roots = new Set<string>();
+  for (const entry of (process.env.PATH ?? "").split(":")) {
+    if (!entry || !existsSync(entry)) continue;
+    for (const dir of [entry, real(entry)]) {
+      if (under(dir, home)) continue;
+      roots.add(basename(dir) === "bin" ? dirname(dir) : dir);
+    }
+  }
+  return [...roots].filter((r) => r !== "/" && r !== "/private");
 }
 
 export class SandboxUnavailable extends Error {}
@@ -75,7 +97,8 @@ export function macProfile(box: Box, home: string): string {
     "(deny file-write*)",
     '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))',
     ...box.writable.map((w) => `(allow file-write* (subpath ${q(real(w))}))`),
-    `(deny file-read* (subpath ${q(home)}))`,
+    box.readsListedOnly ? '(deny file-read* (subpath "/"))' : `(deny file-read* (subpath ${q(home)}))`,
+    ...(box.readsListedOnly ? ['(allow file-read* (literal "/"))', ...[...SYSTEM_READS, ...installRoots(home)].map((r) => `(allow file-read* (subpath ${q(r)}))`)] : []),
     ...[...box.readable, ...box.writable, ...toolRoots(home)].map((r) => `(allow file-read* (subpath ${q(real(r))}))`),
     "(allow file-read-metadata)",
   );

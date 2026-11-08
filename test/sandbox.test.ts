@@ -23,6 +23,16 @@ test("the macOS profile denies writes, home reads and the network except what's 
   expect(macProfile({ readable: [], writable: [], network: true }, "/Users/me")).toContain("(deny network-outbound (remote unix-socket))");
 });
 
+test("a box with listed reads only denies reads everywhere but the system, tools and the paths given", () => {
+  const p = macProfile({ readable: ["/r"], writable: [], network: false, readsListedOnly: true }, "/Users/me");
+  expect(p).toContain('(deny file-read* (subpath "/"))');
+  expect(p).toContain('(allow file-read* (subpath "/System"))');
+  expect(p).toContain('(allow file-read* (subpath "/r"))');
+  expect(p.indexOf('(deny file-read* (subpath "/"))')).toBeLessThan(p.indexOf('(allow file-read* (subpath "/r"))'));
+  expect(p).not.toContain('(allow file-read* (subpath "/Users"))');
+  expect(macProfile({ readable: [], writable: [], network: false }, "/Users/me")).not.toContain('(deny file-read* (subpath "/"))');
+});
+
 test("the bubblewrap arguments hide home, bind only what's given, and cut the network", () => {
   const a = bwrapArgs({ readable: [], writable: ["/w"], network: false }, "/home/me", "/w");
   expect(a.join(" ")).toContain("--tmpfs /home/me");

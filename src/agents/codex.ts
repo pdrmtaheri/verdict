@@ -8,8 +8,9 @@
 //    only commands on its built-in list of safe read-only ones (ls, cat, rg…)
 //    without asking, and asks before anything else. verdict declines every
 //    request, so curl, python, scripts and the like never run.
-// 2. Sandbox: the app-server runs in verdict's OS sandbox (src/sandbox.ts)
-//    with no network of its own; its only way out is verdict's egress proxy
+// 2. Sandbox: the app-server runs in verdict's OS sandbox (src/sandbox.ts),
+//    which on macOS denies reads everywhere but the system, installed tools,
+//    the repo and Codex's own install and home, with no network of its own; its only way out is verdict's egress proxy
 //    (src/egress.ts), which tunnels HTTPS to OpenAI's hosts. Codex follows the
 //    proxy because its throwaway home turns on `respect_system_proxy`; if it
 //    connects directly the sandbox refuses, so this fails closed.
@@ -19,8 +20,9 @@
 // own requests to OpenAI (which carry that login anyway) or verdict's tools
 // (files in .verdict/, which a person reviews before merging).
 //
-// With VERDICT_SANDBOX=off, none of this applies: Codex's own read-only
-// sandbox is the only limit, and it can't stop reads outside the repo.
+// Without verdict's sandbox none of this holds, and Codex's own read-only
+// sandbox can't stop reads outside the repo, so with VERDICT_SANDBOX=off
+// verdict refuses to start Codex.
 import { z } from "zod";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -33,11 +35,15 @@ import { sandboxed } from "../sandbox.ts";
 // the OpenAI API (API-key logins), and token refresh.
 const CODEX_HOSTS = (process.env.VERDICT_CODEX_HOSTS ?? "chatgpt.com,api.openai.com,auth.openai.com").split(",").map((h) => h.trim()).filter(Boolean);
 
-interface Launched {
+export interface Launched {
   argv: string[];
   env?: Record<string, string>;
   done: () => Promise<void>;
 }
+
+// Tests of the protocol swap in a launcher that runs a fake app-server
+// directly; the sandbox has its own tests.
+export const testing: { launch?: (cwd: string) => Promise<Launched> } = {};
 
 // Codex gets a throwaway CODEX_HOME holding only a copy of the user's login
 // (auth.json) and a config that turns on proxy support. It never sees, and
@@ -53,7 +59,10 @@ interface Launched {
 async function launch(cwd: string): Promise<Launched> {
   const bin = Bun.which("codex", { PATH: process.env.PATH ?? "" });
   if (process.env.VERDICT_SANDBOX === "off") {
-    return { argv: [bin ?? "codex", "app-server"], env: { ...process.env } as Record<string, string>, done: async () => {} };
+    throw new Error(
+      "Codex's built-in shell can read files outside the repo unless verdict's sandbox confines it, and VERDICT_SANDBOX=off turns that off: " +
+        "run verdict without VERDICT_SANDBOX=off, or set VERDICT_AGENT=claude-code or pi",
+    );
   }
   const realHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
   if (!bin) throw new Error("codex is not installed: install the Codex CLI and run `codex login`");
@@ -86,7 +95,7 @@ async function launch(cwd: string): Promise<Launched> {
     const proxy = `http://127.0.0.1:${egress.port}`;
     const env = { CODEX_HOME: codexHome, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy, https_proxy: proxy, http_proxy: proxy, all_proxy: proxy, NO_PROXY: "", no_proxy: "" };
     const install = dirname(dirname(realpathSync(bin)));
-    const box = { readable: [cwd, install], writable: [codexHome], network: false, localhostPorts: [egress.port], env };
+    const box = { readable: [cwd, install], writable: [codexHome], network: false, localhostPorts: [egress.port], env, readsListedOnly: true };
     if (process.platform === "linux") {
       // Inside its own network namespace, Codex reaches the proxy through a
       // forwarder that listens on the same port there.
@@ -196,7 +205,7 @@ export const codex: Agent = {
     let failed!: (e: Error) => void;
     const finished = new Promise<void>((resolve, reject) => ((done = resolve), (failed = reject)));
 
-    const launched = await launch(task.cwd);
+    const launched = await (testing.launch ?? launch)(task.cwd);
     let conn: Connection;
     try {
       conn = new Connection(
@@ -232,13 +241,10 @@ export const codex: Agent = {
         cwd: task.cwd,
         ...(task.model ? { model: task.model } : {}),
         // "untrusted": only Codex's safe read-only commands run without asking.
-        // With verdict's sandbox off, fall back to "never" plus Codex's own
-        // read-only sandbox, as before.
-        approvalPolicy: process.env.VERDICT_SANDBOX === "off" ? "never" : "untrusted",
+        approvalPolicy: "untrusted",
         // Inside verdict's sandbox Codex can't start its own (macOS sandboxes
-        // don't nest), and verdict's is the stricter one. Without verdict's,
-        // fall back to Codex's read-only mode.
-        sandbox: process.env.VERDICT_SANDBOX === "off" ? "read-only" : "danger-full-access",
+        // don't nest), and verdict's is the stricter one.
+        sandbox: "danger-full-access",
         developerInstructions: task.system,
         ephemeral: true,
         dynamicTools: Object.entries(task.tools).map(([name, t]) => ({

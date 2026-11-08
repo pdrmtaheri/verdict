@@ -355,7 +355,7 @@ Everything it can cause to run is therefore confined:
   policy `untrusted`: only Codex's built-in safe read-only commands run
   without asking, and verdict declines every approval request. The app-server
   also runs in the same sandbox, with no network of its own: its only way out is verdict's
-  egress proxy (`src/egress.ts`), which tunnels HTTPS to OpenAI's hosts
+  egress proxy (`src/agents/egress.ts`), which tunnels HTTPS to OpenAI's hosts
   (`VERDICT_CODEX_HOSTS`) and refuses everything else. On macOS the sandbox
   allows only the proxy's localhost port; on Linux the sandbox has its own
   network namespace, and a forwarder inside it (`src/agents/netns-forward.ts`)
@@ -368,7 +368,13 @@ Everything it can cause to run is therefore confined:
   need to run `codex login`. Remaining risk: a safe-listed read can put the
   repo or the login copy into the model's context; from there it can leave
   only through Codex's own requests to OpenAI or through files in `.verdict/`,
-  which a person reviews.
+  which a person reviews. On macOS, Codex's sandbox also denies reads outside
+  the system, installed tools, the repo, and Codex's install and home: other
+  users' files, other volumes and the rest of the user's disk are out of
+  reach, not only the home directory. On Linux the sandbox hides home, /tmp
+  and /run, but the rest of the filesystem is readable. With
+  `VERDICT_SANDBOX=off` verdict refuses to start Codex, since nothing would
+  confine its shell.
 
 `verdict check` runs the reviewed enforcers in the real repo, unsandboxed:
 they are code that passed the merge review.
