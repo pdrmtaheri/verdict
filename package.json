@@ -1,5 +1,6 @@
 {
   "name": "verdict",
+  "version": "0.1.0",
   "type": "module",
   "private": true,
   "bin": {
@@ -8,7 +9,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "build": "bun scripts/build.ts",
+    "build:all": "bun scripts/build.ts --all"
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.35",

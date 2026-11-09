@@ -1,0 +1,82 @@
+# Builds verdict as a single-file executable for each platform, runs each one
+# on that platform, and on a v* tag attaches them to a GitHub release.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: darwin-arm64, run: native }
+          - { os: macos-latest, target: darwin-x64, run: rosetta }
+          - { os: ubuntu-latest, target: linux-x64, run: native }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, run: native }
+          - { os: ubuntu-latest, target: linux-x64-musl, run: alpine }
+          - { os: ubuntu-24.04-arm, target: linux-arm64-musl, run: alpine }
+          - { os: windows-latest, target: windows-x64, run: native }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/build.ts ${{ matrix.target }}
+
+      - name: Run the executable
+        run: |
+          exe=dist/verdict-${{ matrix.target }}
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          case "${{ matrix.run }}" in
+            native)  run() { "$exe" "$@"; } ;;
+            rosetta) softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+                     run() { arch -x86_64 "$exe" "$@"; } ;;
+            alpine)  run() { docker run --rm -e BUN_BE_BUN -v "$PWD:/w" -w /w alpine:3 sh -c 'apk add -q libstdc++ libgcc && "$@"' _ "$exe" "$@"; } ;;
+          esac
+          run --version
+          run help > /dev/null
+          run playground validate examples/traffic-light
+          # The bun it carries, for bun test enforcers on machines without Bun.
+          BUN_BE_BUN=1 run --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdict-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect executables and checksums
+        run: |
+          mkdir release
+          find artifacts -type f -name 'verdict-*' -exec cp {} release/ \;
+          cat artifacts/*/SHA256SUMS | sort -k2 > release/SHA256SUMS
+          cat release/SHA256SUMS
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: release/*
+          generate_release_notes: true

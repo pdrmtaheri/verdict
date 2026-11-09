@@ -11,6 +11,7 @@ import { BadLaws, findSets, isDir, repoRoot, shown } from "./sets.ts";
 import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
 import { Claims, plan } from "./plan.ts";
+import pkg from "../package.json" with { type: "json" };
 
 const USAGE = `usage: verdict <command> [path...]
 
@@ -30,6 +31,7 @@ const USAGE = `usage: verdict <command> [path...]
           playground that your coding agent connects to
   playground validate [dir]
           check a playground's manifest and laws; exit 1 with what to fix
+  version print verdict's version
 
 Laws live in VERDICT.md files: any directory can have one, and its laws apply
 to that directory's subtree. Each keeps its plan in VERDICT.lock and its
@@ -46,6 +48,10 @@ Decision models (jev): TYPESAFE_AI_API_KEY; VERDICT_DECISION_MODEL
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "version" || command === "--version" || command === "-v") {
+    console.log(`verdict ${pkg.version}`);
+    return 0;
+  }
   if (command === "playground") return playgroundCommand(rest);
   const paths: string[] = [];
   const again: string[] = [];

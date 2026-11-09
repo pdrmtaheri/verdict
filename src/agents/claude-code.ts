@@ -3,8 +3,21 @@
 // (Bash, Read, Edit…) and the user's own MCP servers are switched off.
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { callTool, type Agent } from "../agent.ts";
+import { COMPILED } from "../runtime.ts";
 
 const SERVER = "verdict";
+
+// From source, the SDK runs the Claude Code binary from its own platform
+// package. A compiled verdict can't reach node_modules, so it runs the
+// `claude` the user installed (or VERDICT_CLAUDE).
+function claudeExecutable(): string | undefined {
+  const given = process.env.VERDICT_CLAUDE;
+  if (given) return given;
+  if (!COMPILED) return undefined;
+  const found = Bun.which("claude");
+  if (!found) throw new Error("Claude Code is not installed: install it (https://claude.com/claude-code) and log in by running `claude` once, set VERDICT_CLAUDE to its path, or set VERDICT_AGENT=codex or pi");
+  return found;
+}
 
 export const claudeCode: Agent = {
   name: "claude-code",
@@ -15,9 +28,11 @@ export const claudeCode: Agent = {
         return { content: [{ type: "text", text: r.text }], isError: r.isError };
       }),
     );
+    const pathToClaudeCodeExecutable = claudeExecutable();
     const session = query({
       prompt: task.prompt,
       options: {
+        ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
         systemPrompt: task.system,
         model: task.model ?? "sonnet",
         effort: task.reasoning,

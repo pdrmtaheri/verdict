@@ -6,9 +6,9 @@
 // replays the break of any enforcer whose inputs changed since.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Enforcer } from "./lock.ts";
-import type { Where } from "./where.ts";
+import { posixRelative, type Where } from "./where.ts";
 
 // label -> fingerprint. A label is a path relative to the law's directory, or
 // "package.json#<dependency>" for the version a package.json asks for.
@@ -36,7 +36,7 @@ const fingerprint = (text: string | Buffer) => createHash("sha256").update(text)
 export function inputsOf(w: Where, e: Enforcer): Inputs {
   const inputs: Inputs = {};
   const add = (abs: string) => {
-    if (existsSync(abs)) inputs[relative(w.dir, abs) || "."] = fingerprint(readFileSync(abs));
+    if (existsSync(abs)) inputs[posixRelative(w.dir, abs) || "."] = fingerprint(readFileSync(abs));
   };
   const file = resolve(w.dir, e.path);
   add(file);
@@ -51,7 +51,7 @@ export function inputsOf(w: Where, e: Enforcer): Inputs {
   if (pkg) {
     const json = JSON.parse(readFileSync(pkg, "utf8"));
     const deps = { ...json.dependencies, ...json.devDependencies } as Record<string, string>;
-    const at = relative(w.dir, pkg);
+    const at = posixRelative(w.dir, pkg);
     for (const [name, version] of Object.entries(deps).sort()) if (wanted(name)) inputs[`${at}#${name}`] = String(version);
   }
   return inputs;
@@ -67,7 +67,7 @@ export function pinnedFiles(w: Where, e: Enforcer): string[] {
     // The runner is picked from the law's directory up; versions from the file's.
     for (const from of [w.dir, dirname(resolve(w.dir, e.path))]) {
       for (let dir = from; dir.startsWith(w.repo); dir = dirname(dir)) {
-        if (existsSync(join(dir, "package.json"))) files.add(relative(w.dir, join(dir, "package.json")));
+        if (existsSync(join(dir, "package.json"))) files.add(posixRelative(w.dir, join(dir, "package.json")));
         if (dir === w.repo || dir === dirname(dir)) break;
       }
     }

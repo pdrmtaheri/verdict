@@ -30,6 +30,11 @@ import { dirname, join } from "node:path";
 import { callTool, type Agent, type AgentTask } from "../agent.ts";
 import { startEgress } from "./egress.ts";
 import { sandboxed } from "../sandbox.ts";
+import { bunCommand } from "../runtime.ts";
+// @ts-ignore: with type "text", the import is the file's source, not its module
+import forwarderSource from "./netns-forward.ts" with { type: "text" };
+
+const FORWARDER = forwarderSource as unknown as string;
 
 // Where Codex may connect: the ChatGPT backend it uses with a ChatGPT login,
 // the OpenAI API (API-key logins), and token refresh.
@@ -99,10 +104,14 @@ async function launch(cwd: string): Promise<Launched> {
     if (process.platform === "linux") {
       // Inside its own network namespace, Codex reaches the proxy through a
       // forwarder that listens on the same port there.
-      const forward = join(import.meta.dir, "netns-forward.ts");
+      // The forwarder's source is embedded (it imports only node:net), so it
+      // runs the same from a checkout and from a compiled verdict.
+      const forward = join(work, "netns-forward.ts");
+      writeFileSync(forward, FORWARDER, { mode: 0o600 });
+      const bun = bunCommand(null)!;
       const wrapped = sandboxed(
-        [process.execPath, forward, egress.socketPath!, String(egress.port), "--", bin, "app-server"],
-        { ...box, readable: [...box.readable, dirname(forward), dirname(process.execPath)], writable: [...box.writable, work] },
+        [bun.bin, forward, egress.socketPath!, String(egress.port), "--", bin, "app-server"],
+        { ...box, env: { ...box.env, ...bun.env }, readable: [...box.readable, ...bun.readable], writable: [...box.writable, work] },
         cwd,
       );
       return { ...wrapped, done };

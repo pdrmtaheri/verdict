@@ -9,17 +9,47 @@ See [DESIGN.md](DESIGN.md) for the full design.
 
 ## Requirements
 
-- [Bun](https://bun.sh)
+- [Bun](https://bun.sh), unless you use a prebuilt executable (see Install)
 - A coding agent you are already logged into: Claude Code (default), Codex, or
   Pi. verdict uses no model API keys of its own.
 - An OS sandbox for running generated code: macOS (`sandbox-exec`, built in) or
   Linux ([bubblewrap](https://github.com/containers/bubblewrap)). Without one,
   verdict refuses to run the code and the enforcer is reported inconclusive.
+  Windows has no supported sandbox: `verdict check` runs there, but planning,
+  and replaying the break of an enforcer whose inputs changed, need
+  `VERDICT_SANDBOX=off`; set it only inside a VM or container.
 - Optional, depending on what the planner picks: [Semgrep](https://semgrep.dev)
   for pattern enforcers, the project's own eslint, oxlint or ruff for lint enforcers,
   and `TYPESAFE_AI_API_KEY` for decision-model (jev) judges.
 
 ## Install
+
+### A prebuilt executable
+
+Each [release](https://github.com/pdrmtaheri/verdict/releases) has a
+single-file `verdict` for macOS (arm64, x64), Linux (x64, arm64, glibc and
+musl) and Windows (x64), with a `SHA256SUMS`. It carries its own Bun runtime,
+so it needs neither Bun nor `node_modules`; put it on your PATH:
+
+```sh
+curl -fLo verdict https://github.com/pdrmtaheri/verdict/releases/latest/download/verdict-darwin-arm64
+chmod +x verdict && mv verdict /usr/local/bin/
+```
+
+The executable runs Claude Code through the `claude` on your PATH (or
+`VERDICT_CLAUDE`, a path to it), and runs `bun test` enforcers with the Bun on
+your PATH, or with its own when there is none.
+
+To build them yourself:
+
+```sh
+bun install
+bun run build             # dist/verdict-<platform> for this machine
+bun run build:all         # every platform (cross-compiled)
+bun scripts/build.ts linux-x64 windows-x64
+```
+
+### From source
 
 ```sh
 bun install

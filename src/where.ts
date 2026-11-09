@@ -2,12 +2,16 @@
 // apply to that directory's subtree, and their VERDICT.lock and .verdict/ sit
 // beside them. `dir` is that directory; `repo` is the repository root, which
 // bounds everything verdict reads. Paths in a lock are relative to `dir`.
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 export interface Where {
   dir: string;
   repo: string;
 }
+
+// A relative path with "/" separators on every OS: what goes in a lock, a
+// report or anything else that's committed or compared across machines.
+export const posixRelative = (from: string, to: string): string => relative(from, to).split(sep).join("/");
 
 export const at = (root: string): Where => ({ dir: root, repo: root });
 

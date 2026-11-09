@@ -7,6 +7,12 @@ import { basename, join } from "node:path";
 import { z } from "zod";
 import { callTool } from "../agent.ts";
 import { inside, readTools } from "../tools.ts";
+// @ts-ignore: with type "file", each import is the file's path (embedded when compiled)
+import indexHtml from "./ui/index.html" with { type: "file" };
+// @ts-ignore
+import appJs from "./ui/app.js" with { type: "file" };
+// @ts-ignore
+import styleCss from "./ui/style.css" with { type: "file" };
 import { Events } from "./events.ts";
 import { handleMcp } from "./mcp.ts";
 import { MANIFEST_FILE, loadManifest } from "./manifest.ts";
@@ -14,8 +20,8 @@ import { LAWS_FILE, newState, playgroundTools, type PlaygroundState } from "./to
 import { lawViews, tally } from "./view.ts";
 import { MAIN, codePath, hasVersion, versionList } from "./versions.ts";
 
-const UI_DIR = join(import.meta.dir, "ui");
-const ASSETS: Record<string, string> = { "/": "index.html", "/app.js": "app.js", "/style.css": "style.css" };
+// Imported as files so `bun build --compile` embeds them in the executable.
+const ASSETS: Record<string, string> = { "/": indexHtml as unknown as string, "/app.js": appJs as unknown as string, "/style.css": styleCss as unknown as string };
 const TYPES: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8" };
 
 export interface Playground {
@@ -137,7 +143,7 @@ export async function startPlayground(target: string, opts: { port?: number; tok
         const bad = refuse(req, port, token, url.pathname === "/");
         if (bad) return bad;
         const ext = asset.split(".").pop()!;
-        return new Response(Bun.file(join(UI_DIR, asset)), { headers: { "content-type": TYPES[ext]!, "cache-control": "no-store" } });
+        return new Response(Bun.file(asset), { headers: { "content-type": TYPES[ext]!, "cache-control": "no-store" } });
       }
       // /preview/<token>/<file>: the first playground's main version.
       // /pv/<token>/<playground>/<version>/<file>: any of them.

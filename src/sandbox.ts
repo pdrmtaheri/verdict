@@ -11,7 +11,7 @@
 // sandbox off; use it only when something else already confines verdict.
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, delimiter, dirname, join, sep } from "node:path";
 
 export interface Box {
   readable: string[]; // extra paths readable inside the user's home
@@ -36,7 +36,7 @@ const SYSTEM_READS = ["/System", "/usr", "/bin", "/sbin", "/Library/Apple", "/Li
 // /usr/local…): each PATH entry, its real directory and that directory's prefix.
 export function installRoots(home = real(homedir())): string[] {
   const roots = new Set<string>();
-  for (const entry of (process.env.PATH ?? "").split(":")) {
+  for (const entry of (process.env.PATH ?? "").split(delimiter)) {
     if (!entry || !existsSync(entry)) continue;
     for (const dir of [entry, real(entry)]) {
       if (under(dir, home)) continue;
@@ -56,7 +56,7 @@ const under = (p: string, dir: string) => p === dir || p.startsWith(dir + sep);
 // entry is a bin/ directory, unless that parent is home itself or ~/.local.
 export function toolRoots(home = real(homedir())): string[] {
   const roots = new Set<string>();
-  for (const entry of (process.env.PATH ?? "").split(":")) {
+  for (const entry of (process.env.PATH ?? "").split(delimiter)) {
     if (!entry || !existsSync(entry)) continue;
     const dir = real(entry);
     if (!under(dir, home)) continue;

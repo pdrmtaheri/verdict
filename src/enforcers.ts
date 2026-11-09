@@ -12,6 +12,7 @@ import { fail, inconclusive, pass, type Result } from "./result.ts";
 import { staleReason } from "./specbind.ts";
 import { readTools } from "./tools.ts";
 import { runLint } from "./linters.ts";
+import { bunCommand } from "./runtime.ts";
 
 export interface Context {
   root: string; // the law's directory: enforcers run here
@@ -93,6 +94,13 @@ function findBin(root: string, bin: string, repo = root): string | null {
   }
 }
 
+// How to run a shell command line: sh, or on Windows without one (Git for
+// Windows ships sh), cmd.
+function shell(): string[] {
+  if (process.platform !== "win32" || Bun.which("sh")) return ["sh", "-c"];
+  return ["cmd.exe", "/d", "/s", "/c"];
+}
+
 // ---------------------------------------------------------------- tests
 // The runner is inferred from the file name and the repo's own tooling.
 
@@ -165,11 +173,19 @@ const test: Runner = async (ctx) => {
       ? fail(`${path} is run as one script, so it can't select the test "${name}": remove the name from VERDICT.lock, or run \`verdict plan\``)
       : inconclusive(`verdict can't tell how to run ${path}: name it *.test.ts, *_test.go, test_*.py or similar, or make it executable`);
   }
-  const { runner, argv } = cmd;
-  if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) {
+  const { runner } = cmd;
+  let { argv } = cmd;
+  let env: Record<string, string> = {};
+  let readable: string[] = [];
+  if (runner === "bun") {
+    // A compiled verdict carries its own Bun for bun tests when none is installed.
+    const bun = bunCommand(findBin(root, "bun", ctx.repo ?? root))!;
+    argv = [bun.bin, ...argv.slice(1)];
+    ({ env, readable } = bun);
+  } else if (!argv[0]!.startsWith("./") && !findBin(root, argv[0]!, ctx.repo ?? root)) {
     return inconclusive(`${argv[0]} is not installed: install it (or add it to the project's dev dependencies), then run verdict check again`);
   }
-  const r = await run(ctx, argv);
+  const r = await run(ctx, argv, readable, env);
   if (r.code === 0) {
     if (passedCount(runner, r.output) === 0) {
       const what = name ? `the test "${name}" in ${path}` : path;
@@ -179,7 +195,7 @@ const test: Runner = async (ctx) => {
   }
   // 77 is the automake "skipped" code: a precondition the test needs is missing.
   if (r.code === SKIPPED) return inconclusive(`${path} needs something that isn't here (a service, a credential, seed data; its output below says what): provide it, then run verdict check again\n${tail(r.output, 10)}`);
-  return fail(`${tail(r.output)}\nRun ${argv.join(" ")} to see the failure; fix the code, or edit the law in VERDICT.md if it no longer holds`);
+  return fail(`${tail(r.output)}\nRun ${[...Object.entries(env).map(([k, v]) => `${k}=${v}`), ...argv].join(" ")} to see the failure; fix the code, or edit the law in VERDICT.md if it no longer holds`);
 };
 
 export const SKIPPED = 77;
@@ -242,7 +258,7 @@ const DecisionFile = z.object({
 const decision: Runner = async (ctx) => {
   const { root, path } = ctx;
   const spec = DecisionFile.parse(JSON.parse(readFileSync(join(root, path), "utf8")));
-  const state = await run(ctx, ["sh", "-c", spec.state_from], [], {}, { cwd: targetOf(ctx) });
+  const state = await run(ctx, [...shell(), spec.state_from], [], {}, { cwd: targetOf(ctx) });
   if (state.code !== 0) return inconclusive(`state_from in ${path} exited ${state.code} (output below): fix the command, or run \`verdict plan --again\` to re-plan the law\n${tail(state.output)}`);
   if (state.output === "") return pass("state_from produced nothing to judge");
   const result = await experimental_decide({
