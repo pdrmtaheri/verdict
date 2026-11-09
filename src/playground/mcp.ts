@@ -18,7 +18,7 @@ export function mcpServer(tools: Tools, events: Events): McpServer {
 }
 
 function summarize(name: string, input: unknown, out: string): string {
-  const path = (input as { path?: string } | null)?.path;
+  const path = typeof input === "object" && input !== null && "path" in input && typeof input.path === "string" ? input.path : undefined;
   const first = out.split("\n")[0] ?? "";
   return path ? `${path}: ${first}` : `${name}: ${first}`;
 }

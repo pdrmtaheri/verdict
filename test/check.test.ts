@@ -10,6 +10,7 @@ import { overrides as agents } from "../src/agent.ts";
 import { stampModels } from "../src/specbind.ts";
 import { inside } from "../src/fsx.ts";
 import { at } from "../src/where.ts";
+import { rejectsWith } from "./rejects.ts";
 import { repo, scriptedAgent } from "./helpers.ts";
 
 afterEach(() => {
@@ -130,8 +131,8 @@ test("the planner may run its own scripts in .verdict/, but nothing else outside
   const run = writeTools(root, join(root, ".verdict")).run;
   const call = (argv: string[]) => run.execute({ argv });
   expect(await call(["./.verdict/t.sh"])).toContain("hi");
-  await expect(call(["./evil.sh"])).rejects.toThrow("outside .verdict");
-  await expect(call(["curl", "example.com"])).rejects.toThrow("not allowed");
+  await rejectsWith(call(["./evil.sh"]), "outside .verdict");
+  await rejectsWith(call(["curl", "example.com"]), "not allowed");
 });
 
 test("grep skips tracked symlinks that point outside the repo; git rejects writing flags", async () => {
@@ -146,10 +147,10 @@ test("grep skips tracked symlinks that point outside the repo; git rejects writi
   const tools = readTools(root);
   expect(await tools.list_files.execute({})).toContain("link.txt");
   expect(await tools.grep.execute({ pattern: "TOKEN" })).toBe("(no matches)");
-  await expect(tools.git.execute({ args: ["diff", "--output=/tmp/x"] })).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] })).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["blame", "--ignore-revs-file=/etc/hosts", "a.txt"] })).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["diff", outside] })).rejects.toThrow("outside");
+  await rejectsWith(tools.git.execute({ args: ["diff", "--output=/tmp/x"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["blame", "--ignore-revs-file=/etc/hosts", "a.txt"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["diff", outside] }), "outside");
   expect(await tools.git.execute({ args: ["ls-files", "a.txt"] })).toContain("a.txt");
 });
 
@@ -166,21 +167,22 @@ test("tool input is validated before a tool runs, whichever agent calls it", asy
   expect(await callTool(boom, {})).toEqual({ text: "nope", isError: true });
 });
 
+// A spec must name the code it models, stamped with its hash, or it is stale.
+const counterSpec = (inv: string) => `---- MODULE Counter ----\n\\* models: counter.js\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
+
 // Runs only where TLC is available (tlc on PATH or VERDICT_TLA2TOOLS / the TLA+ Toolbox's jar).
 const toolboxJar = "/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar";
 const tlcAvailable = !!Bun.which("tlc") || !!process.env.VERDICT_TLA2TOOLS || (await Bun.file(toolboxJar).exists());
 test.skipIf(!tlcAvailable)("a TLA+ enforcer passes when its invariant holds and fails when it's violated", async () => {
   const saved = process.env.VERDICT_TLA2TOOLS;
   if (!Bun.which("tlc") && !saved) process.env.VERDICT_TLA2TOOLS = toolboxJar;
-  // A spec must name the code it models, stamped with its hash, or it is stale.
-  const spec = (inv: string) => `---- MODULE Counter ----\n\\* models: counter.js\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
   try {
-    const ok = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": spec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const ok = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": counterSpec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
     stampModels(ok, ".verdict/Counter.tla");
     const okR = await checkLaw(at(ok), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] });
     expect(okR.details[0]!.result.message).not.toContain("Cannot find source file");
     expect(okR.status).toBe("pass");
-    const bad = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": spec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const bad = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": counterSpec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
     stampModels(bad, ".verdict/Counter.tla");
     expect((await checkLaw(at(bad), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] })).status).toBe("fail");
   } finally {

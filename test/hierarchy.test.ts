@@ -43,7 +43,7 @@ const cli = (cwd: string, ...args: string[]) => {
 test("verdict finds every VERDICT.md, or the ones under the given paths", async () => {
   const root = realpathSync(monorepo());
   const all = await findSets(root, []);
-  expect(all.sets.map((s) => s.dir)).toEqual([root, join(root, "packages/a"), join(root, "packages/b")].sort());
+  expect(all.sets.map((s) => s.dir)).toEqual([root, join(root, "packages/a"), join(root, "packages/b")].toSorted());
   expect((await findSets(root, ["packages/a"])).sets.map((s) => s.dir)).toEqual([join(root, "packages/a")]);
   expect((await findSets(join(root, "packages"), ["."])).sets).toHaveLength(2); // a path is resolved from cwd
   expect((await findSets(root, ["nowhere"])).unmatched).toEqual(["nowhere"]);

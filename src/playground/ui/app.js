@@ -13,7 +13,7 @@ function withQuery(path, extra = {}) {
   return u.pathname + u.search;
 }
 const api = (path, init = {}, extra = {}) => fetch(withQuery(path, extra), { ...init, headers: { ...init.headers, "x-playground-token": token } });
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== null && text !== undefined) e.textContent = text; return e; };
 
 const ICONS = {
   pass: '<circle cx="12" cy="12" r="10" fill="#0E7A4B"/><path d="M7.5 12.5l3 3 6-6.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
@@ -44,7 +44,7 @@ const prev = { status: new Map(), selected: null, first: true, loaded: false, se
 
 // "never reads the `now` clock" -> text with <code> for the backticked parts.
 function withCode(parent, text) {
-  text.split("`").forEach((part, i) => parent.append(i % 2 ? el("code", "", part) : document.createTextNode(part)));
+  for (const [i, part] of text.split("`").entries()) parent.append(i % 2 ? el("code", "", part) : document.createTextNode(part));
 }
 
 // A failure in plain words: a headline, a few points, and the raw output folded away.
@@ -53,7 +53,7 @@ function why(e) {
   const box = el("div", "why");
   if (!w) { if (e.message) box.append(el("pre", "err", e.message)); return box; }
   box.append(el("p", `headline ${e.status}`, w.headline));
-  if (w.points.length) {
+  if (w.points.length > 0) {
     const ul = el("ul", "points");
     for (const p of w.points) {
       const li = el("li", "");
@@ -79,6 +79,7 @@ function sub(law) {
   if (bad) {
     const w = bad.why;
     const line = w ? (w.points[0]?.text ?? w.headline) : bad.message.split("\n")[0];
+    // oxlint-disable-next-line typescript/prefer-nullish-coalescing -- an empty first line must fall back to the file name, which ?? would not do
     return [`${kindName(bad.kind)}: ${line || fileName(bad.path)}`, bad.status];
   }
   if (law.status === "unchecked") return ["Planned. Press Check to run it.", "dim"];
@@ -132,7 +133,7 @@ function renderLaws() {
   rows.replaceChildren();
   if (laws.length === 0) { rows.append(el("p", "empty", "No laws yet. Press Edit laws and add one as a top-level bullet.")); }
   if (!laws.some((l) => l.hash === selected)) selected = (laws.find((l) => l.status === "fail") ?? laws[0])?.hash ?? null;
-  laws.forEach((law, i) => rows.append(lawRow(law, law.hash === selected, i)));
+  for (const [i, law] of laws.entries()) rows.append(lawRow(law, law.hash === selected, i));
   moveBand();
   prev.status = new Map(laws.map((l) => [l.hash, l.status]));
   prev.selected = selected;
@@ -192,17 +193,19 @@ const WHO = { agent: "agent", ui: "you", server: "verdict" };
 
 function addActivity(a, top = true) {
   const li = el("li", a.isError ? "err" : "");
-  if (a.id != null && !prev.seen.has(a.id) && prev.loaded) li.classList.add("fresh");
-  if (a.id != null) prev.seen.add(a.id);
+  const hasId = a.id !== null && a.id !== undefined;
+  if (hasId && !prev.seen.has(a.id) && prev.loaded) li.classList.add("fresh");
+  if (hasId) prev.seen.add(a.id);
   li.append(el("span", "t", clock(a.at)), el("span", "who", WHO[a.source] ?? a.source), el("span", "tool", a.tool), el("span", "sum", a.summary));
   const ul = $("activity-list");
-  top ? ul.prepend(li) : ul.append(li);
+  if (top) ul.prepend(li);
+  else ul.append(li);
   while (ul.children.length > 100) ul.lastChild.remove();
 }
 
 function renderConnection() {
   const last = state.activity.find((a) => a.source === "agent");
-  const ago = state.activity.filter((a) => a.source === "agent").at(-1);
+  const ago = state.activity.findLast((a) => a.source === "agent");
   const latest = ago ?? last;
   $("conn-dot").className = `dot ${latest ? "green" : ""}`;
   $("conn-text").textContent = latest ? "Agent connected" : "No agent connected yet";
@@ -214,7 +217,7 @@ function renderConnection() {
 }
 
 async function openFile(path, li) {
-  document.querySelectorAll("#file-list li.on").forEach((n) => n.classList.remove("on"));
+  for (const n of document.querySelectorAll("#file-list li.on")) n.classList.remove("on");
   li.classList.add("on");
   const r = await api(`/api/file?path=${encodeURIComponent(path)}`);
   $("file-view").className = "";
@@ -309,7 +312,9 @@ async function load() {
   prev.loaded = true;
 }
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const wait = (ms) => new Promise((r) => {
+  setTimeout(r, ms);
+});
 
 async function run(button, path) {
   busy++;
@@ -317,7 +322,7 @@ async function run(button, path) {
   const isCheck = path.startsWith("/api/check");
   const all = path.includes("v=all");
   if (isCheck) { checking = true; checkingAll = all; renderLaws(); renderVersions(); }
-  document.querySelectorAll("#plan, #check").forEach((b) => (b.disabled = true));
+  for (const b of document.querySelectorAll("#plan, #check")) b.disabled = true;
   button.classList.add("busy");
   try {
     const r = await api(path.split("?")[0], { method: "POST" }, isCheck ? { v: all ? "all" : V } : {});
@@ -325,7 +330,7 @@ async function run(button, path) {
   } finally {
     if (checking) { await wait(Math.max(0, 700 - (Date.now() - started))); checking = false; checkingAll = false; } // a fast check still reads as a run
     button.classList.remove("busy");
-    if (--busy === 0) document.querySelectorAll("#plan, #check").forEach((b) => (b.disabled = false));
+    if (--busy === 0) for (const b of document.querySelectorAll("#plan, #check")) b.disabled = false;
     await load();
   }
 }
@@ -348,21 +353,21 @@ $("save-laws").onclick = async () => {
   $("laws-msg").textContent = r.ok ? (await r.json()).message : await r.text();
   if (r.ok) { toggle("edit", true); await load(); }
 };
-document.querySelectorAll(".tab").forEach((t) => {
+for (const t of document.querySelectorAll(".tab")) {
   t.onclick = () => {
-    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+    for (const x of document.querySelectorAll(".tab")) x.classList.toggle("on", x === t);
     $("tab-claude").hidden = t.dataset.tab !== "claude";
     $("tab-other").hidden = t.dataset.tab !== "other";
   };
-});
+}
 async function copy(text, button) {
   const label = button.textContent;
   try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
   catch { button.textContent = "Select and copy"; }
   setTimeout(() => (button.textContent = label), 1500);
 }
-document.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copy($(b.dataset.copy).textContent, b)));
-document.querySelectorAll("[data-copy-text]").forEach((b) => (b.onclick = () => copy(b.dataset.copyText, b)));
+for (const b of document.querySelectorAll("[data-copy]")) b.onclick = () => copy($(b.dataset.copy).textContent, b);
+for (const b of document.querySelectorAll("[data-copy-text]")) b.onclick = () => copy(b.dataset.copyText, b);
 
 // The drawer: closed until a tab is clicked, then it opens upward; drag its top edge to resize.
 const drawer = { open: null, height: 300 };
@@ -371,11 +376,11 @@ function setDrawer(panel) {
   drawer.open = panel;
   $("drawer").classList.toggle("open", !!panel);
   $("dpanel").inert = !panel;
-  document.querySelectorAll(".dtab").forEach((t) => t.setAttribute("aria-expanded", String(t.dataset.panel === panel)));
-  document.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== panel));
+  for (const t of document.querySelectorAll(".dtab")) t.setAttribute("aria-expanded", String(t.dataset.panel === panel));
+  for (const p of document.querySelectorAll("[data-pane]")) p.hidden = p.dataset.pane !== panel;
   $("dpanel").style.setProperty("--dh", `${drawer.height}px`);
 }
-document.querySelectorAll(".dtab").forEach((t) => (t.onclick = () => setDrawer(drawer.open === t.dataset.panel ? null : t.dataset.panel)));
+for (const t of document.querySelectorAll(".dtab")) t.onclick = () => setDrawer(drawer.open === t.dataset.panel ? null : t.dataset.panel);
 $("drawer-close").onclick = () => setDrawer(null);
 const maxHeight = () => Math.max(160, document.querySelector(".side").clientHeight - 44 - 160);
 function resizeTo(h) {

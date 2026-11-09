@@ -10,6 +10,7 @@ import { checkVersion, newState, playgroundTools } from "../src/playground/tools
 import { MAIN, versionList, versionTarget } from "../src/playground/versions.ts";
 import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
+import { rejectsWith } from "./rejects.ts";
 
 const law = "The answer is always 42.";
 const hash = parseLaws(`- ${law}`)[0]!.hash;
@@ -59,7 +60,7 @@ test("the same law passes on one version and fails on another, with the same enf
   expect(wrong[0]!.status).toBe("fail");
   expect(wrong[0]!.details[0]!.result.message).toContain("does not say 42");
   expect(readFileSync(join(root, "public/answer.txt"), "utf8")).toBe("42\n"); // the real folder is untouched
-  await expect(checkVersion(root, m, "nope")).rejects.toThrow('no version "nope"');
+  await rejectsWith(checkVersion(root, m, "nope"), 'no version "nope"');
 });
 
 test("a check on a version points the enforcer at that folder and changes nothing on disk", async () => {
@@ -69,12 +70,12 @@ test("a check on a version points the enforcer at that folder and changes nothin
   expect(versionTarget(root, m, "wrong")).toBe(join(root, "versions/wrong"));
   expect(() => versionTarget(root, m, "ghost")).toThrow('no version "ghost"');
   const listing = () => new Bun.Glob("**/*").scanSync({ cwd: root, dot: true, onlyFiles: true });
-  const before = [...listing()].sort();
+  const before = [...listing()].toSorted();
   const stamp = (f: string) => readFileSync(join(root, f), "utf8");
   const files0 = Object.fromEntries(before.map((f) => [f, stamp(f)]));
   await checkVersion(root, m, "wrong");
   await checkVersion(root, m, MAIN);
-  expect([...listing()].sort()).toEqual(before); // nothing created, deleted or swapped
+  expect([...listing()].toSorted()).toEqual(before); // nothing created, deleted or swapped
   for (const f of before) expect(stamp(f)).toBe(files0[f]!);
 });
 
@@ -133,7 +134,7 @@ test("a folder of playgrounds is a hub; each has its own state, MCP endpoint and
   expect(running.ids).toEqual(["alpha", "beta"]);
   const base = new URL(running.url).origin;
   const h = { "x-playground-token": running.token };
-  const state = (q: string) => fetch(`${base}/api/state${q}`, { headers: h }).then((r) => r.json()) as Promise<any>;
+  const state = async (q: string): Promise<any> => (await fetch(`${base}/api/state${q}`, { headers: h })).json();
   const s = await state("?p=beta&v=wrong");
   expect(s.id).toBe("beta");
   expect(s.version).toBe("wrong");

@@ -144,6 +144,9 @@ export function certEnv(): Record<string, string> {
   return bundle ? { SSL_CERT_FILE: bundle } : {};
 }
 
+// The parent's environment without unset entries.
+const definedEnv = (): Record<string, string> => Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
+
 // Wraps argv so it runs inside the box. Returns the argv and environment to run.
 export function sandboxed(argv: string[], box: Box, cwd: string): { argv: string[]; env: Record<string, string> } {
   const home = real(homedir());
@@ -158,7 +161,7 @@ export function sandboxed(argv: string[], box: Box, cwd: string): { argv: string
     ...box.env,
   };
   const full: Box = { ...box, writable: [...box.writable, scratch] };
-  if (process.env.VERDICT_SANDBOX === "off") return { argv, env: { ...process.env, ...env } as Record<string, string> };
+  if (process.env.VERDICT_SANDBOX === "off") return { argv, env: { ...definedEnv(), ...env } };
   if (process.platform === "darwin") {
     return { argv: ["/usr/bin/sandbox-exec", "-p", macProfile(full, home), ...argv], env };
   }

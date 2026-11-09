@@ -30,7 +30,17 @@ export async function callTool(tool: Tool, input: unknown): Promise<{ text: stri
   }
 }
 
-export type Reasoning = "low" | "medium" | "high";
+export const REASONING = ["low", "medium", "high"] as const;
+export type Reasoning = (typeof REASONING)[number];
+
+// VERDICT_REASONING, when it's set.
+function reasoningFromEnv(): Reasoning | undefined {
+  const value = process.env.VERDICT_REASONING;
+  if (value === undefined || value === "") return undefined;
+  const known = REASONING.find((r) => r === value);
+  if (!known) throw new Error(`VERDICT_REASONING=${value} isn't a reasoning level: set it to one of ${REASONING.join(", ")}, or unset it`);
+  return known;
+}
 
 export interface AgentTask {
   system: string;
@@ -101,7 +111,7 @@ export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Pr
     },
   });
   const agent = await pickAgent();
-  let failure: unknown = null;
+  let failure: Error | null = null;
   try {
     await agent.run({
       system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
@@ -109,11 +119,11 @@ export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Pr
       tools: { ...opts.tools, submit },
       cwd: opts.cwd,
       maxSteps: opts.maxSteps ?? 40,
-      reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
+      reasoning: reasoningFromEnv() ?? opts.reasoning ?? "medium",
       model: process.env.VERDICT_MODEL,
     });
   } catch (err) {
-    failure = err;
+    failure = err instanceof Error ? err : new Error(String(err));
   }
   // An agent that doesn't wait for its own tool calls can finish while a
   // submit is still being validated: let it settle first.

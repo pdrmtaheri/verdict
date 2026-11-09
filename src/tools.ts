@@ -110,9 +110,9 @@ export function readTools(root: string, repo = root) {
           } catch {
             continue;
           }
-          text.split("\n").forEach((line, i) => {
+          for (const [i, line] of text.split("\n").entries()) {
             if (re.test(line)) hits.push(`${f}:${i + 1}: ${line.slice(0, 300)}`);
-          });
+          }
           if (hits.length >= 500) break;
         }
         return hits.slice(0, 500).join("\n") || "(no matches)";

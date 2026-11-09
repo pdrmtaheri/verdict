@@ -22,7 +22,7 @@ export function ruleFiles(dir: string): string[] {
   const found = FILES.filter((f) => existsSync(join(dir, f)));
   for (const d of DIRS) {
     if (!existsSync(join(dir, d))) continue;
-    for (const f of readdirSync(join(dir, d), { recursive: true }) as string[]) {
+    for (const f of readdirSync(join(dir, d), { recursive: true, encoding: "utf8" })) {
       if (/\.(md|mdc|txt)$/.test(f)) found.push(join(d, f));
     }
   }

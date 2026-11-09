@@ -66,12 +66,12 @@ export async function checkVersion(root: string, m: Manifest, version: string): 
   const laws = parseLaws(existsSync(join(root, LAWS_FILE)) ? readFileSync(join(root, LAWS_FILE), "utf8") : "");
   const lock = readLock(join(root, LOCK_FILE));
   return Promise.all(
-    laws.map((law) => {
+    laws.map(async (law): Promise<LawReport> => {
       const entry = lock.get(law.hash);
       // Main also replays a break when its pinned inputs changed; another version's code is not what the breaks were made against.
       return entry
         ? checkLaw(at(root), entry, { sandbox: { readable: [target], writable: [] }, target, exclude: target === root ? ["versions"] : undefined, hash: law.hash, replay: target === root ? undefined : false })
-        : { law: law.text, status: "unplanned" as const, details: [] };
+        : { law: law.text, status: "unplanned", details: [] };
     }),
   );
 }

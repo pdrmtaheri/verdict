@@ -100,8 +100,6 @@ async function main(argv: string[]): Promise<number> {
   const limit = makeLimit(jobs());
   if (command === "plan") {
     const claims = new Claims(sets);
-    const matches = (sel: string, law: Law) =>
-      (/^[0-9a-f]{4,8}$/.test(sel) && law.hash.startsWith(sel)) || law.text.toLowerCase().includes(sel.toLowerCase());
     for (const sel of again) {
       if (!sets.some((set) => set.laws.some((law) => matches(sel, law)))) {
         return usageError(`--again ${JSON.stringify(sel)} matches no law: use a hash prefix from VERDICT.lock or a phrase from the law`);
@@ -122,14 +120,18 @@ async function main(argv: string[]): Promise<number> {
     console.log(JSON.stringify(sarif(repo, sets.map((set, i) => ({ where: set, lawsFile: set.lawsFile, reports: reports[i]! }))), null, 2));
     return exitCode(reports.flat());
   }
-  sets.forEach((set, i) => {
+  for (const [i, set] of sets.entries()) {
     if (many) console.log(`\n${shown(repo, set.lawsFile)}`);
-    console.log(format(reports[i]!, !many));
-  });
+    console.log(format(reports[i] ?? [], !many));
+  }
   const all = reports.flat();
   if (many) console.log(`\n${summarize(all)}`);
   return exitCode(all);
 }
+
+// Whether `--again <sel>` names this law: a hash prefix or part of its text.
+const matches = (sel: string, law: Law): boolean =>
+  (/^[0-9a-f]{4,8}$/.test(sel) && law.hash.startsWith(sel)) || law.text.toLowerCase().includes(sel.toLowerCase());
 
 function usageError(message: string): number {
   console.error(`${message}\n(run \`verdict help\` for usage)`);
@@ -158,12 +160,12 @@ async function playgroundCommand(args: string[]): Promise<number> {
   const rest = validateOnly ? args.slice(1) : args;
   const portAt = rest.indexOf("--port");
   const port = portAt >= 0 ? Number(rest[portAt + 1]) : undefined;
-  if (portAt >= 0 && (!Number.isInteger(port) || port! < 0 || port! > 65535)) {
+  if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
     console.error("--port needs a number from 0 to 65535");
     return 2;
   }
-  const dirs = rest.filter((_, i) => portAt < 0 || (i !== portAt && i !== portAt + 1));
-  const root = resolve(dirs[0] ?? process.cwd());
+  const dir = rest.find((_, i) => portAt < 0 || (i !== portAt && i !== portAt + 1));
+  const root = resolve(dir ?? process.cwd());
   // A folder holding one playground, or a folder of playgrounds.
   const found = discoverPlaygrounds(root);
   const problems = (found.length > 0 ? found : [root]).flatMap((d) => validatePlayground(d).map((p) => (found.length > 1 ? `${d}: ${p}` : p)));

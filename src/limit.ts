@@ -6,7 +6,11 @@ export function makeLimit(n: number): Limit {
   let active = 0;
   const queue: (() => void)[] = [];
   return async (job) => {
-    if (active >= n) await new Promise<void>((resolve) => queue.push(resolve));
+    if (active >= n) {
+      await new Promise<void>((resolve) => {
+        queue.push(resolve);
+      });
+    }
     active++;
     try {
       return await job();

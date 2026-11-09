@@ -11,6 +11,7 @@ import { readTools } from "../tools.ts";
 // With { type: "file" } each import is the file's path (embedded when
 // compiled); TypeScript types the .html and .js ones as modules.
 import indexHtml from "./ui/index.html" with { type: "file" };
+// oxlint-disable-next-line import/default -- a file import is its path, not the module
 import appJs from "./ui/app.js" with { type: "file" };
 import styleCss from "./ui/style.css" with { type: "file" };
 import { Events } from "./events.ts";
@@ -21,6 +22,7 @@ import { lawViews, tally } from "./view.ts";
 import { MAIN, codePath, hasVersion, versionList } from "./versions.ts";
 
 // Imported as files so `bun build --compile` embeds them in the executable.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- with { type: "file" } each is a path
 const ASSETS: Record<string, string> = { "/": indexHtml as unknown as string, "/app.js": appJs as unknown as string, "/style.css": styleCss };
 const TYPES: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8" };
 
@@ -55,6 +57,7 @@ export function refuse(req: Request, port: number, token: string, needsToken: bo
 }
 
 const json = (v: unknown, status = 200) => Response.json(v, { status });
+const nothing = (): void => undefined;
 
 interface Instance {
   id: string;
@@ -71,7 +74,7 @@ export function discoverPlaygrounds(dir: string): string[] {
   if (existsSync(join(dir, MANIFEST_FILE))) return [dir];
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
   return readdirSync(dir)
-    .sort()
+    .toSorted()
     .map((n) => join(dir, n))
     .filter((d) => statSync(d).isDirectory() && existsSync(join(d, MANIFEST_FILE)));
 }
@@ -135,7 +138,7 @@ export async function startPlayground(target: string, opts: { port?: number; tok
     idleTimeout: 0, // SSE and long plans
     async fetch(req) {
       const url = new URL(req.url);
-      const port = server.port as number;
+      const port: number = server.port ?? 0;
       const asset = ASSETS[url.pathname];
       if (asset) {
         // The page itself carries no secrets; the token is checked on / so the
@@ -229,7 +232,7 @@ export async function startPlayground(target: string, opts: { port?: number; tok
         return r.isError ? new Response(r.text, { status: 500 }) : json({ text: r.text });
       }
       if (url.pathname === "/api/events" && req.method === "GET") {
-        let off = () => {};
+        let off = nothing;
         const stream = new ReadableStream({
           start(c) {
             const enc = new TextEncoder();

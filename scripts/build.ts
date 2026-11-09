@@ -52,5 +52,5 @@ for (const t of targets) {
   const file = await build(t);
   sums.push(`${createHash("sha256").update(readFileSync(file)).digest("hex")}  ${basename(file)}`);
 }
-writeFileSync(join(DIST, "SHA256SUMS"), sums.join("\n") + "\n");
+writeFileSync(join(DIST, "SHA256SUMS"), `${sums.join("\n")}\n`);
 console.log(`\n${sums.join("\n")}`);

@@ -3,6 +3,7 @@
 // nearest file or tool is on the way up to the repository root.
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { z } from "zod";
 import { exec } from "./exec.ts";
 
 // The real path when it exists, the path itself otherwise. Paths are compared
@@ -122,6 +123,9 @@ export async function listFiles(root: string, fallback: { glob: string; dot?: bo
 
 // The dependencies and devDependencies a package.json asks for.
 export function packageDeps(file: string): Record<string, string> {
-  const json = JSON.parse(readFileSync(file, "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  const json = PackageJson.parse(JSON.parse(readFileSync(file, "utf8")));
   return { ...json.dependencies, ...json.devDependencies };
 }
+
+const Versions = z.record(z.string(), z.string()).optional();
+const PackageJson = z.object({ dependencies: Versions, devDependencies: Versions });

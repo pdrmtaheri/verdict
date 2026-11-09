@@ -9,6 +9,8 @@ import { hashFile, isStale, modelsOf, staleReason, stampModels } from "../src/sp
 import type { Lock } from "../src/lock.ts";
 import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
+import { homedir } from "node:os";
+import { certEnv } from "../src/sandbox.ts";
 
 const SPEC = "---- MODULE m ----\n\\* scope: the phase table\n\\* models: src/code.js\n====\n";
 const files = (extra: Record<string, string> = {}) => ({ "src/code.js": "const x = 1;\n", ".verdict/m.tla": SPEC, ".verdict/m.cfg": "SPECIFICATION Spec\n", ...extra });
@@ -83,8 +85,6 @@ test("planning rejects a spec with no models line, or with no test beside it", a
   expect(gone.problem).toContain("not a file of the system under check");
 });
 
-import { homedir } from "node:os";
-import { certEnv } from "../src/sandbox.ts";
 
 test("sandboxed tools are pointed at a PEM bundle so they don't ask the keychain", () => {
   const env = certEnv();

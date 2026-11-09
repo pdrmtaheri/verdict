@@ -52,7 +52,7 @@ export function inputsOf(w: Where, e: Enforcer): Inputs {
   if (pkg) {
     const at = posixRelative(w.dir, pkg);
     const deps = Object.entries(packageDeps(pkg)).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const [name, version] of deps) if (wanted(name)) inputs[`${at}#${name}`] = String(version);
+    for (const [name, version] of deps) if (wanted(name)) inputs[`${at}#${name}`] = version;
   }
   return inputs;
 }
@@ -83,7 +83,7 @@ function helpersOf(w: Where, file: string): string[] {
   if (!file.startsWith(`${dir  }/`) || !existsSync(file)) return [];
   const text = readFileSync(file, "utf8");
   const out: string[] = [];
-  for (const f of readdirSync(dir, { recursive: true }) as string[]) {
+  for (const f of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const abs = join(dir, f);
     if (abs === file || f.startsWith("breaks/") || !isFile(abs)) continue; // a dangling link isn't a helper
     const name = basename(f);

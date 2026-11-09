@@ -115,7 +115,7 @@ const exactly = (name: string) => `^${name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\
 export function testCommand(root: string, file: string, repo = root, name?: string): { runner: TestRunner; argv: string[] } | null {
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
     const d = deps(root, repo);
-    const local = (name: string) => findBin(root, name, repo);
+    const local = (tool: string) => findBin(root, tool, repo);
     // JS runners match the full name ("describe block test name"), so the
     // name is matched as a suffix rather than anchored at both ends.
     const pattern = name ? exactly(name).slice(1) : "";
@@ -315,8 +315,8 @@ export function scopeOf(root: string, path: string): string | null {
   }
   if (path.endsWith(".json")) {
     try {
-      const { scope } = JSON.parse(text) as { scope?: unknown };
-      return typeof scope === "string" ? scope : null;
+      const parsed = z.object({ scope: z.string() }).safeParse(JSON.parse(text));
+      return parsed.success ? parsed.data.scope : null;
     } catch {
       return null;
     }

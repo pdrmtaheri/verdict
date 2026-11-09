@@ -11,12 +11,13 @@ export interface Explained {
   raw: string; // shown only behind "technical details"; "" when the headline says it all
 }
 
-const clean = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "").replace(/[ \t]+$/gm, "");
+// oxlint-disable-next-line no-control-regex -- strips ANSI colour codes, which start with ESC
+const clean = (s: string) => s.replaceAll(/\u001b\[[0-9;]*m/g, "").replaceAll(/[ \t]+$/gm, "");
 const sentence = (s: string) => {
-  const t = s.trim().replace(/\s+/g, " ");
+  const t = s.trim().replaceAll(/\s+/g, " ");
   return t ? t[0]!.toUpperCase() + t.slice(1) + (/[.!?…]$/.test(t) ? "" : ".") : t;
 };
-const capital = (s: string) => { const t = s.trim().replace(/\s+/g, " "); return t ? t[0]!.toUpperCase() + t.slice(1) : t; };
+const capital = (s: string) => { const t = s.trim().replaceAll(/\s+/g, " "); return t ? t[0]!.toUpperCase() + t.slice(1) : t; };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // "expect(received).toBeGreaterThanOrEqual(expected)" + Expected/Received lines.
@@ -36,7 +37,7 @@ interface Failure {
 
 function bunFailures(text: string): { failures: Failure[]; pass: number; fail: number } | null {
   const lines = text.split("\n");
-  if (!lines.some((l) => /^\(fail\) /.test(l))) return null;
+  if (!lines.some((l) => l.startsWith("(fail) "))) return null;
   const failures: Failure[] = [];
   let block: string[] = [];
   for (const line of lines) {
@@ -49,19 +50,20 @@ function bunFailures(text: string): { failures: Failure[]; pass: number; fail: n
     block = [];
   }
   const num = (word: string) => Number(new RegExp(`^\\s*(\\d+) ${word}$`, "m").exec(text)?.[1] ?? 0);
-  return { failures, pass: num("pass"), fail: num("fail") || failures.length };
+  const failed = num("fail");
+  return { failures, pass: num("pass"), fail: failed > 0 ? failed : failures.length };
 }
 
 function problemOf(block: string[]): string {
   const at = block.map((l) => l.trim());
-  const err = [...at].reverse().find((l) => /^(error:|[A-Z][A-Za-z]*Error:)/.test(l));
+  const err = at.toReversed().find((l) => /^(error:|[A-Z][A-Za-z]*Error:)/.test(l));
   const expected = at.findLast((l) => l.startsWith("Expected:"))?.slice(9).trim();
   const received = at.findLast((l) => l.startsWith("Received:"))?.slice(9).trim();
   if (err && expected !== undefined && received !== undefined) {
     const matcher = MATCHERS.find(([re]) => re.test(err));
     return `${matcher ? matcher[1](expected) : `expected ${expected}`}, got ${received}`;
   }
-  if (err && /^error: expect\(/.test(err)) return "the values did not match what the test expected";
+  if (err?.startsWith("error: expect(")) return "the values did not match what the test expected";
   if (err) {
     const msg = err.replace(/^error:\s*/, "");
     return /^[A-Z][A-Za-z]*Error:/.test(msg) ? `the code crashed with ${msg}` : msg;
@@ -82,7 +84,7 @@ function semgrepFindings(text: string): Point[] | null {
     const code = /^\s*(\d+)┆\s?(.*)$/.exec(lines.slice(i + 1).find((l) => /^\s*\d+┆/.test(l)) ?? "");
     points.push({ text: `${file ? `${file}${code ? `:${code[1]}` : ""} — ` : ""}${msg}`, code: code?.[2]?.trim() });
   }
-  return points.length ? points : null;
+  return points.length > 0 ? points : null;
 }
 
 function tlcTrace(text: string): { headline: string; points: Point[] } | null {
@@ -114,7 +116,8 @@ export function explain(kind: string, status: "pass" | "fail" | "inconclusive", 
   if (kind === "test") {
     const b = bunFailures(raw);
     if (b) {
-      const total = b.pass + b.fail || b.failures.length;
+      const counted = b.pass + b.fail;
+      const total = counted > 0 ? counted : b.failures.length;
       return {
         headline: `${b.failures.length} of ${plural(total, "check")} failed.`,
         points: b.failures.map((f) => ({ text: `${capital(f.name)} — ${f.problem}` })),
@@ -136,5 +139,5 @@ export function explain(kind: string, status: "pass" | "fail" | "inconclusive", 
   }
 
   const first = raw.split("\n").find((l) => l.trim() && !/^(bun test v|…)/.test(l.trim())) ?? raw;
-  return { headline: sentence(first.length > 160 ? first.slice(0, 157) + "…" : first), points: [], raw: raw.includes("\n") ? raw : "" };
+  return { headline: sentence(first.length > 160 ? `${first.slice(0, 157)}…` : first), points: [], raw: raw.includes("\n") ? raw : "" };
 }

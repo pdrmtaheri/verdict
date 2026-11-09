@@ -43,7 +43,7 @@ async function lawFiles(repo: string): Promise<{ laws: string[]; playgrounds: st
 export async function findSets(cwd: string, paths: string[]): Promise<{ repo: string; sets: LawSet[]; unmatched: string[] }> {
   const repo = await repoRoot(cwd);
   const found = await lawFiles(repo);
-  const all = found.laws.sort();
+  const all = found.laws.toSorted();
   const targets = paths.map((p) => real(resolve(cwd, p)));
   // A playground's laws count only when a path points at the playground or inside it.
   const apart = (f: string) => found.playgrounds.some((pg) => under(dirname(f), pg) && !targets.some((t) => under(t, pg)));
@@ -56,7 +56,7 @@ export async function findSets(cwd: string, paths: string[]): Promise<{ repo: st
     try {
       text = readFileSync(lawsFile, "utf8");
     } catch (err) {
-      const why = (err as NodeJS.ErrnoException).code ?? errorMessage(err);
+      const why = (typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" && err.code) || errorMessage(err);
       throw new BadLaws(`can't read ${lawsFile} (${why}): check that it's a readable file, or remove it from the repo`);
     }
     return { dir, repo, lawsFile, lockFile, laws: parseLaws(text), lock: readLock(lockFile) };

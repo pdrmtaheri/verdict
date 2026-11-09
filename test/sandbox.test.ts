@@ -8,6 +8,7 @@ import { inside } from "../src/fsx.ts";
 import { checkGitArgs, writeTools } from "../src/tools.ts";
 import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
+import { rejectsWith } from "./rejects.ts";
 
 const live = process.env.VERDICT_SANDBOX !== "off";
 
@@ -92,7 +93,7 @@ test("write_file refuses a dangling symlink in .verdict/", async () => {
   const target = join(process.env.TMPDIR!, `verdict-dangling-${Date.now()}.txt`);
   symlinkSync(target, join(root, ".verdict", "link.txt"));
   expect(() => inside(root, ".verdict/link.txt", join(root, ".verdict"))).toThrow("symlink to nowhere");
-  await expect(writeTools(root, join(root, ".verdict")).write_file.execute({ path: ".verdict/link.txt", content: "x" })).rejects.toThrow();
+  await rejectsWith(writeTools(root, join(root, ".verdict")).write_file.execute({ path: ".verdict/link.txt", content: "x" }));
   expect(existsSync(target)).toBe(false);
   writeFileSync(join(root, "a.txt"), "still fine");
 });

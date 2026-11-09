@@ -97,7 +97,7 @@ test("test inputs include the runner's config and its version", () => {
   const root = repo({ "package.json": JSON.stringify({ devDependencies: { vitest: "^3.0.0", lodash: "4" } }), "vitest.config.ts": "export default {}\n", "pkg/.verdict/a.test.ts": "// scope: x\n" });
   const w = { dir: join(root, "pkg"), repo: root };
   const inputs = inputsOf(w, { kind: "test", path: ".verdict/a.test.ts" });
-  expect(Object.keys(inputs).sort()).toEqual(["../package.json#vitest", "../vitest.config.ts", ".verdict/a.test.ts"]);
+  expect(Object.keys(inputs).toSorted()).toEqual(["../package.json#vitest", "../vitest.config.ts", ".verdict/a.test.ts"]);
   expect(changes(inputs, { ...inputs, "../package.json#vitest": "^4.0.0" })).toEqual(["../package.json: vitest went from ^3.0.0 to ^4.0.0"]);
 });
 
@@ -118,7 +118,7 @@ test("helpers an enforcer in .verdict/ names are among its inputs", () => {
     ".verdict/unrelated.ts": "",
     ".verdict/breaks/abc.json": "[]",
   });
-  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).sort()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
+  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).toSorted()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
 });
 
 test("a dangling link in .verdict/ doesn't break pinning", async () => {
