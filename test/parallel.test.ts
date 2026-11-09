@@ -57,7 +57,7 @@ test("laws are planned at the same time, up to the limit", async () => {
   const laws = parseLaws("- Law one.\n- Law two.\n- Law three.\n");
   const { agent, stats } = overlappingAgent((p) => (p.includes("one") ? "one" : p.includes("two") ? "two" : "three"));
   agents.agent = agent;
-  const ok = await plan(at(root), join(root, "VERDICT.lock"), laws, new Map(), () => {}, { limit: makeLimit(3) });
+  const ok = await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws, lock: new Map() }, () => {}, { limit: makeLimit(3) });
   expect(ok).toBe(true);
   expect(stats.peak).toBe(3);
 });
@@ -68,6 +68,6 @@ test("a planner can't overwrite a file another law is using", async () => {
   const { agent, stats } = overlappingAgent(() => "same-name"); // both pick the same file
   agents.agent = agent;
   const log: string[] = [];
-  await plan(at(root), join(root, "VERDICT.lock"), laws, new Map(), (l) => log.push(l), { limit: makeLimit(2), claims: new Claims() });
+  await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws, lock: new Map() }, (l) => log.push(l), { limit: makeLimit(2), claims: new Claims() });
   expect(stats.results.filter((r) => r.includes("belongs to another law"))).toHaveLength(1);
 });

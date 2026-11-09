@@ -13,7 +13,7 @@ afterEach(() => {
 
 test("finds the prose rule files a project already has", () => {
   const root = repo({ "AGENTS.md": "x", "CONTRIBUTING.md": "x", ".cursor/rules/money.mdc": "x", ".cursor/rules/img.png": "x", "README.md": "x" });
-  expect(ruleFiles(root).sort()).toEqual([".cursor/rules/money.mdc", "AGENTS.md", "CONTRIBUTING.md"]);
+  expect(ruleFiles(root).toSorted()).toEqual([".cursor/rules/money.mdc", "AGENTS.md", "CONTRIBUTING.md"]);
 });
 
 test("drafts VERDICT.md from them, one law per bullet, citing each source", async () => {

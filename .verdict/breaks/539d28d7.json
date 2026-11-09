@@ -27,8 +27,8 @@
     "edits": [
       {
         "path": "src/tools.ts",
-        "find": "const box = sandboxed(argv, { readable: [copy, repo], writable: [copy], network: false }, dir);",
-        "replace": "const box = sandboxed(argv, { readable: [copy, repo], writable: [copy, repo], network: false }, dir);"
+        "find": "return execBoxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy], network: false }, dir, { timeoutMs: 5 * 60_000 });",
+        "replace": "return execBoxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy, repo], network: false }, dir, { timeoutMs: 5 * 60_000 });"
       }
     ]
   },

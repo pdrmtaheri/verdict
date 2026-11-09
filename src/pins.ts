@@ -5,10 +5,11 @@
 // config it runs under, the version of the tool it needs), and `check`
 // replays the break of any enforcer whose inputs changed since.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { isFile, nearest, packageDeps, upTo } from "./fsx.ts";
 import type { Enforcer } from "./lock.ts";
-import { posixRelative, type Where } from "./where.ts";
+import { OUT_DIR, posixRelative, type Where } from "./where.ts";
 
 // label -> fingerprint. A label is a path relative to the law's directory, or
 // "package.json#<dependency>" for the version a package.json asks for.
@@ -49,10 +50,9 @@ export function inputsOf(w: Where, e: Enforcer): Inputs {
   const wanted = DEPS[e.kind];
   const pkg = wanted && nearest(dirname(file), "package.json", w.repo);
   if (pkg) {
-    const json = JSON.parse(readFileSync(pkg, "utf8"));
-    const deps = { ...json.dependencies, ...json.devDependencies } as Record<string, string>;
     const at = posixRelative(w.dir, pkg);
-    for (const [name, version] of Object.entries(deps).sort()) if (wanted(name)) inputs[`${at}#${name}`] = String(version);
+    const deps = Object.entries(packageDeps(pkg)).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const [name, version] of deps) if (wanted(name)) inputs[`${at}#${name}`] = version;
   }
   return inputs;
 }
@@ -66,9 +66,9 @@ export function pinnedFiles(w: Where, e: Enforcer): string[] {
   if (e.kind === "test" || DEPS[e.kind]) {
     // The runner is picked from the law's directory up; versions from the file's.
     for (const from of [w.dir, dirname(resolve(w.dir, e.path))]) {
-      for (let dir = from; dir.startsWith(w.repo); dir = dirname(dir)) {
+      for (const dir of upTo(from, w.repo)) {
+        if (!dir.startsWith(w.repo)) break;
         if (existsSync(join(dir, "package.json"))) files.add(posixRelative(w.dir, join(dir, "package.json")));
-        if (dir === w.repo || dir === dirname(dir)) break;
       }
     }
   }
@@ -79,33 +79,18 @@ export function pinnedFiles(w: Where, e: Enforcer): string[] {
 // a fixture, a shared module): what it runs depends on them too. Matched by
 // file name, which over-pins rather than misses.
 function helpersOf(w: Where, file: string): string[] {
-  const dir = join(w.dir, ".verdict");
-  if (!file.startsWith(dir + "/") || !existsSync(file)) return [];
+  const dir = join(w.dir, OUT_DIR);
+  if (!file.startsWith(`${dir  }/`) || !existsSync(file)) return [];
   const text = readFileSync(file, "utf8");
   const out: string[] = [];
-  for (const f of readdirSync(dir, { recursive: true }) as string[]) {
+  for (const f of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const abs = join(dir, f);
     if (abs === file || f.startsWith("breaks/") || !isFile(abs)) continue; // a dangling link isn't a helper
     const name = basename(f);
     const stem = name.replace(/\.[cm]?[jt]sx?$/, "");
-    if (text.includes(name) || (stem !== name && new RegExp(`["'/]${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(text))) out.push(abs);
+    if (text.includes(name) || (stem !== name && new RegExp(`["'/]${stem.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(text))) out.push(abs);
   }
   return out;
-}
-
-function isFile(p: string): boolean {
-  try {
-    return statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function nearest(from: string, name: string, repo: string): string | null {
-  for (let dir = from; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, name))) return join(dir, name);
-    if (dir === repo || dir === dirname(dir) || !dir.startsWith(repo)) return null;
-  }
 }
 
 // What changed between the inputs an enforcer was proven against and now,
@@ -113,7 +98,7 @@ function nearest(from: string, name: string, repo: string): string | null {
 export function changes(was: Inputs, now: Inputs): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(was)) {
-    if (!(k in now)) out.push(k.includes("#") ? `${k.replace("#", " no longer lists ")}` : `${k} was removed`);
+    if (!(k in now)) out.push(k.includes("#") ? k.replace("#", " no longer lists ") : `${k} was removed`);
     else if (now[k] !== v) out.push(k.includes("#") ? `${k.replace("#", ": ")} went from ${v} to ${now[k]}` : `${k} changed`);
   }
   for (const k of Object.keys(now)) {

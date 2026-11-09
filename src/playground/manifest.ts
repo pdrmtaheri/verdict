@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize } from "node:path";
 import { z } from "zod";
+import { errorMessage } from "../fsx.ts";
 import { parseLaws } from "../laws.ts";
 
 export const PANELS = ["brief", "preview", "laws", "checks", "files", "activity"] as const;
@@ -30,7 +31,7 @@ export function loadManifest(root: string): Manifest {
   try {
     raw = JSON.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new Error(`${MANIFEST_FILE} is not valid JSON: ${(err as Error).message}`);
+    throw new Error(`${MANIFEST_FILE} is not valid JSON: ${errorMessage(err)}`, { cause: err });
   }
   const parsed = Manifest.safeParse(raw);
   if (!parsed.success) throw new Error(`${MANIFEST_FILE} is invalid:\n${z.prettifyError(parsed.error)}`);
@@ -45,7 +46,7 @@ export function validatePlayground(root: string): string[] {
   try {
     manifest = loadManifest(root);
   } catch (err) {
-    problems.push((err as Error).message);
+    problems.push(errorMessage(err));
   }
   const lawsFile = join(root, "VERDICT.md");
   if (!existsSync(lawsFile)) problems.push("no VERDICT.md: add at least one law as a top-level bullet");

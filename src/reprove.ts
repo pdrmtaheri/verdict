@@ -2,15 +2,15 @@
 // A check can keep passing after the code it describes has moved, e.g. a rule
 // scoped to src/money/ once the money code lives in src/billing/. That pass
 // looks like a proof. `verdict plan` replays every stored break to find out.
-import { breakFor, describe, prove, readBreaks } from "./breaks.ts";
+import { breakFor, describe, prove, readBreaks, type Proof } from "./breaks.ts";
 import { checkLaw } from "./check.ts";
-import { withScratch } from "./scratch.ts";
-import { inCopy, type Where } from "./where.ts";
 import type { Law } from "./laws.ts";
 import { enforcerId, type Lock, type LockEntry } from "./lock.ts";
 import { inputsOf } from "./pins.ts";
-import type { Result } from "./result.ts";
-import { isStale, staleReason, stampModels, STALE } from "./specbind.ts";
+import { inconclusive, type Result } from "./result.ts";
+import { withScratch } from "./scratch.ts";
+import { isStale, STALE, staleReason, stampModels } from "./specbind.ts";
+import { inCopy, type Where } from "./where.ts";
 
 // "fails today": it failed when it was planned too (no break), a known finding.
 // "newly failing": it passed when planned (it has a break) and fails now: a
@@ -26,57 +26,63 @@ export interface Reproof {
   pinned: LockEntry;
 }
 
+// What re-proving found for one enforcer, in the order outcomeOf weighs them.
+type Tag = "stale spec" | "regression" | "known fail" | "drift" | "blocked" | "proven";
+
+// The law's outcome from its enforcers' tags. A failing enforcer decides it,
+// unless a spec is stale: then a failing test can't say whether the code or
+// the spec is wrong, so it's drift and triage decides.
+export function outcomeOf(tags: Tag[]): Outcome {
+  const has = (t: Tag) => tags.includes(t);
+  if ((has("regression") || has("known fail")) && !has("stale spec")) return has("regression") ? "newly failing" : "fails today";
+  if (has("stale spec") || has("drift")) return "drift";
+  if (has("blocked")) return "blocked";
+  return "in sync";
+}
+
+// Runs a law's enforcers the way plan runs everything, even enforcers already
+// in the lock: in a sandboxed scratch copy, without replaying breaks.
+const checkInScratch = (w: Where, entry: LockEntry) =>
+  withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), entry, { sandbox: { readable: [w.repo] }, replay: false }));
+
 export async function reproveLaw(w: Where, law: Law, lock: Lock): Promise<Reproof> {
   const entry = lock.get(law.hash);
   if (!entry) return { law, outcome: "not planned", findings: [], pinned: { law: law.text, enforcers: [] } };
-  // plan runs everything in a sandboxed scratch copy, even enforcers already in the lock.
-  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), entry, { sandbox: { readable: [w.repo] }, replay: false }));
+  const today = await checkInScratch(w, entry);
   const breaks = readBreaks(w.dir, law.hash);
   const findings: Reproof["findings"] = [];
-  let drift = false;
-  let newlyFailing = false;
-  let blocked = false;
-  let realFail = false;
-  let staleSpec = false; // while a spec is stale a failing test cannot say whether the code or the spec is wrong: triage decides
+  const tags: Tag[] = [];
+  const found = (tag: Tag, path: string, result: Result) => {
+    tags.push(tag);
+    findings.push({ path, result });
+  };
   for (const e of entry.enforcers) {
     const id = enforcerId(e);
     const now = today.details.find((d) => d.id === id)?.result;
     if (!now) continue; // an LLM judge skipped because its decision model was sure
-    if (now.status === "fail" && isStale(now.message)) {
-      drift = true; // the spec's code moved: plan re-stamps it or re-plans the law
-      staleSpec = true;
-      findings.push({ path: id, result: now });
-      continue;
-    }
+    const brk = breakFor(breaks, e, entry.enforcers);
     if (now.status === "fail") {
-      realFail = true;
-      if (breakFor(breaks, e, entry.enforcers)) newlyFailing = true;
-      findings.push({ path: id, result: now });
+      // A stale spec's code moved: plan re-stamps it or re-plans the law.
+      found(isStale(now.message) ? "stale spec" : brk ? "regression" : "known fail", id, now);
       continue;
     }
     if (now.status === "inconclusive") {
-      blocked = true;
-      findings.push({ path: id, result: now });
+      found("blocked", id, now);
       continue;
     }
-    const brk = breakFor(breaks, e, entry.enforcers);
     if (!brk) {
-      drift = true;
-      findings.push({ path: id, result: { status: "inconclusive", message: "passes, but has never been seen to fail (no break)" } });
+      found("drift", id, inconclusive("passes, but has never been seen to fail (no break)"));
       continue;
     }
     const proof = await prove(w, law.text, e, brk);
-    if (proof.kind === "stale" || proof.kind === "missed") drift = true;
-    if (proof.kind === "unknown") blocked = true;
-    findings.push({ path: id, result: describe(proof) });
+    found(PROOF_TAG[proof.kind], id, describe(proof));
   }
-  const outcome: Outcome =
-    realFail && !staleSpec ? (newlyFailing ? "newly failing" : "fails today") : drift ? "drift" : blocked ? "blocked" : "in sync";
-  const settled = (path: string) => findings.find((f) => f.path === path)?.result.status !== "inconclusive";
+  const settled = (id: string) => findings.find((f) => f.path === id)?.result.status !== "inconclusive";
   const pinned = { ...entry, enforcers: entry.enforcers.map((e) => (settled(enforcerId(e)) ? { ...e, inputs: inputsOf(w, e) } : e)) };
-  return { law, outcome, findings, pinned };
+  return { law, outcome: outcomeOf(tags), findings, pinned };
 }
 
+const PROOF_TAG: Record<Proof["kind"], Tag> = { caught: "proven", missed: "drift", stale: "drift", unknown: "blocked" };
 
 // A spec whose modeled code changed is stale. If the law's other enforcers (the
 // tests that replay the spec against the code) still pass on the new code, the
@@ -92,7 +98,7 @@ export async function refreshSpecs(w: Where, law: Law, lock: Lock, log: (line: s
   });
   const others = entry.enforcers.filter((e) => e.kind !== "tla");
   if (stale.length === 0 || others.length === 0) return;
-  const today = await withScratch(w.repo, (copy) => checkLaw(inCopy(w, copy), { ...entry, enforcers: others }, { sandbox: { readable: [w.repo] }, replay: false }));
+  const today = await checkInScratch(w, { ...entry, enforcers: others });
   if (today.status !== "pass") return;
   for (const e of stale) {
     stampModels(w.dir, e.path);

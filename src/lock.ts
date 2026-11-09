@@ -7,7 +7,8 @@
 //           of the config it runs under (see pins.ts). When they differ, check
 //           replays the enforcer's break before trusting a pass.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import YAML from "yaml";
+import YAML, { YAMLParseError } from "yaml";
+import { z } from "zod";
 import type { Law } from "./laws.ts";
 import type { Inputs } from "./pins.ts";
 
@@ -32,10 +33,28 @@ export interface LockEntry {
 
 export type Lock = Map<string, LockEntry>;
 
-const FIELDS = ["name", "rule", "scope", "inputs"];
+const FIELDS = new Set(["name", "rule", "scope", "inputs"]);
 
 // A lock verdict can't read: a merge conflict, a hand edit gone wrong.
 export class BadLock extends Error {}
+
+// What a lock must look like for verdict to read it. Enforcers are read
+// leniently: each is "<kind>: <path>" plus the optional fields.
+const LockFile = z.record(z.string(), z.object({ law: z.string(), enforcers: z.array(z.unknown()).optional() }));
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function readEnforcer(e: unknown): Enforcer[] {
+  if (!isRecord(e)) return [];
+  const kind = Object.keys(e).find((k) => !FIELDS.has(k));
+  if (!kind) return [];
+  const out: Enforcer = { kind, path: String(e[kind]) };
+  if (typeof e.name === "string") out.name = e.name;
+  if (typeof e.rule === "string") out.rule = e.rule;
+  if (typeof e.scope === "string") out.scope = e.scope;
+  if (isRecord(e.inputs)) out.inputs = Object.fromEntries(Object.entries(e.inputs).map(([k, v]) => [k, String(v)]));
+  return [out];
+}
 
 export function readLock(file: string): Lock {
   const lock: Lock = new Map();
@@ -45,30 +64,13 @@ export function readLock(file: string): Lock {
   try {
     parsed = YAML.parse(readFileSync(file, "utf8")) ?? {};
   } catch (err) {
-    const where = (err as { linePos?: { line: number }[] }).linePos?.[0]?.line;
-    throw new BadLock(`${file} is not valid YAML${where ? ` (line ${where})` : ""}: ${fix}`);
+    const where = err instanceof YAMLParseError ? err.linePos?.[0].line : undefined;
+    throw new BadLock(`${file} is not valid YAML${where ? ` (line ${where})` : ""}: ${fix}`, { cause: err });
   }
-  const shaped = (e: unknown) =>
-    !!e && typeof e === "object" && typeof (e as { law?: unknown }).law === "string" &&
-    ((e as { enforcers?: unknown }).enforcers === undefined || Array.isArray((e as { enforcers?: unknown }).enforcers));
-  if (typeof parsed !== "object" || Array.isArray(parsed) || !Object.values(parsed as object).every(shaped)) {
-    throw new BadLock(`${file} isn't a verdict lock (each entry needs a law and a list of enforcers): ${fix}`);
-  }
-  const raw = parsed as Record<string, { law: string; enforcers?: Record<string, unknown>[] }>;
-  for (const [hash, entry] of Object.entries(raw)) {
-    const enforcers = (entry.enforcers ?? []).flatMap((e): Enforcer[] => {
-      const kind = Object.keys(e).find((k) => !FIELDS.includes(k));
-      if (!kind) return [];
-      const out: Enforcer = { kind, path: String(e[kind]) };
-      if (typeof e.name === "string") out.name = e.name;
-      if (typeof e.rule === "string") out.rule = e.rule;
-      if (typeof e.scope === "string") out.scope = e.scope;
-      if (e.inputs && typeof e.inputs === "object") {
-        out.inputs = Object.fromEntries(Object.entries(e.inputs).map(([k, v]) => [k, String(v)]));
-      }
-      return [out];
-    });
-    lock.set(String(hash), { law: String(entry.law), enforcers });
+  const raw = LockFile.safeParse(parsed);
+  if (!raw.success) throw new BadLock(`${file} isn't a verdict lock (each entry needs a law and a list of enforcers): ${fix}`);
+  for (const [hash, entry] of Object.entries(raw.data)) {
+    lock.set(hash, { law: entry.law, enforcers: (entry.enforcers ?? []).flatMap(readEnforcer) });
   }
   return lock;
 }

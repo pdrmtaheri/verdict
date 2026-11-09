@@ -8,7 +8,9 @@ import { loadManifest, validatePlayground } from "../src/playground/manifest.ts"
 import { discoverPlaygrounds, startPlayground, type Playground } from "../src/playground/server.ts";
 import { checkVersion, newState, playgroundTools } from "../src/playground/tools.ts";
 import { MAIN, versionList, versionTarget } from "../src/playground/versions.ts";
+import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
+import { rejectsWith } from "./rejects.ts";
 
 const law = "The answer is always 42.";
 const hash = parseLaws(`- ${law}`)[0]!.hash;
@@ -58,7 +60,7 @@ test("the same law passes on one version and fails on another, with the same enf
   expect(wrong[0]!.status).toBe("fail");
   expect(wrong[0]!.details[0]!.result.message).toContain("does not say 42");
   expect(readFileSync(join(root, "public/answer.txt"), "utf8")).toBe("42\n"); // the real folder is untouched
-  await expect(checkVersion(root, m, "nope")).rejects.toThrow('no version "nope"');
+  await rejectsWith(checkVersion(root, m, "nope"), 'no version "nope"');
 });
 
 test("a check on a version points the enforcer at that folder and changes nothing on disk", async () => {
@@ -68,12 +70,12 @@ test("a check on a version points the enforcer at that folder and changes nothin
   expect(versionTarget(root, m, "wrong")).toBe(join(root, "versions/wrong"));
   expect(() => versionTarget(root, m, "ghost")).toThrow('no version "ghost"');
   const listing = () => new Bun.Glob("**/*").scanSync({ cwd: root, dot: true, onlyFiles: true });
-  const before = [...listing()].sort();
+  const before = [...listing()].toSorted();
   const stamp = (f: string) => readFileSync(join(root, f), "utf8");
   const files0 = Object.fromEntries(before.map((f) => [f, stamp(f)]));
   await checkVersion(root, m, "wrong");
   await checkVersion(root, m, MAIN);
-  expect([...listing()].sort()).toEqual(before); // nothing created, deleted or swapped
+  expect([...listing()].toSorted()).toEqual(before); // nothing created, deleted or swapped
   for (const f of before) expect(stamp(f)).toBe(files0[f]!);
 });
 
@@ -109,12 +111,11 @@ test("a spec stamped for main reads as inconclusive, not stale, on another versi
   const root = repo({ ...files(), ".verdict/m.tla": spec, ".verdict/m.cfg": "SPECIFICATION Spec\n" }, [".verdict/is-42.sh"]);
   const { stampModels } = await import("../src/specbind.ts");
   stampModels(root, ".verdict/m.tla");
-  const { runEnforcer } = await import("../src/enforcers.ts");
-  const mainRun = await runEnforcer("tla", { root, law, path: ".verdict/m.tla" });
+  const mainRun = await runEnforcer({ kind: "tla", path: ".verdict/m.tla" }, { where: at(root), law });
   expect(mainRun.status).not.toBe("fail");
   const { writeFileSync } = await import("node:fs");
   writeFileSync(join(root, "public/answer.txt"), "41\n");
-  const other = await runEnforcer("tla", { root, law, path: ".verdict/m.tla", target: join(root, "versions/wrong") });
+  const other = await runEnforcer({ kind: "tla", path: ".verdict/m.tla" }, { where: at(root), law, target: join(root, "versions/wrong") });
   expect(other.status).toBe("inconclusive");
   expect(other.message).toContain("only the replay test");
   expect(other.message).toContain("versions/wrong");
@@ -133,7 +134,7 @@ test("a folder of playgrounds is a hub; each has its own state, MCP endpoint and
   expect(running.ids).toEqual(["alpha", "beta"]);
   const base = new URL(running.url).origin;
   const h = { "x-playground-token": running.token };
-  const state = (q: string) => fetch(`${base}/api/state${q}`, { headers: h }).then((r) => r.json()) as Promise<any>;
+  const state = async (q: string): Promise<any> => (await fetch(`${base}/api/state${q}`, { headers: h })).json();
   const s = await state("?p=beta&v=wrong");
   expect(s.id).toBe("beta");
   expect(s.version).toBe("wrong");
@@ -172,7 +173,7 @@ test("a folder of playgrounds is a hub; each has its own state, MCP endpoint and
 test.skipIf(!Bun.which("semgrep"))("semgrep scans the target folder, and main's scan leaves the other versions out", async () => {
   const rule = "# scope: public/x.js\nrules:\n  - id: no-date\n    languages: [javascript]\n    severity: ERROR\n    message: do not read the real clock\n    pattern: Date.now()\n";
   const root = repo({ ...files(), ".verdict/no-date.yaml": rule, "public/x.js": "const a = 1;\n", "versions/wrong/public/x.js": "const t = Date.now();\n" }, [".verdict/is-42.sh"]);
-  const run = async (target: string, exclude?: string[]) => (await runEnforcer("semgrep", { root, law, path: ".verdict/no-date.yaml", target, exclude, sandbox: { readable: [root], writable: [] } })).status;
+  const run = async (target: string, exclude?: string[]) => (await runEnforcer({ kind: "semgrep", path: ".verdict/no-date.yaml" }, { where: at(root), law, target, exclude, sandbox: { readable: [root], writable: [] } })).status;
   expect(await run(join(root, "versions/wrong"))).toBe("fail"); // the version's own code is flagged
   expect(await run(root, ["versions"])).toBe("pass"); // main's scan ignores versions/
   expect(await run(root)).toBe("fail"); // without the exclusion it would see them

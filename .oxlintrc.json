@@ -1,14 +1,112 @@
 {
-  "$schema": "./node_modules/oxlint/configs/schema.json",
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "node"
+  ],
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
   "categories": {
-    "correctness": "error"
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
   },
   "rules": {
     "no-eval": "error",
     "no-new-func": "error",
-    "no-unused-vars": "error"
+    "no-unused-vars": "error",
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "prefer-template": "error",
+    "prefer-object-spread": "error",
+    "no-useless-rename": "error",
+    "no-useless-concat": "error",
+    "no-else-return": "error",
+    "no-lonely-if": "error",
+    "no-shadow": "error",
+    "require-await": "off",
+    "no-promise-executor-return": "error",
+    "preserve-caught-error": "error",
+    "no-throw-literal": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/consistent-type-definitions": [
+      "error",
+      "interface"
+    ],
+    "typescript/array-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-inferrable-types": "error",
+    "typescript/prefer-ts-expect-error": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-expect-error": "allow-with-description"
+      }
+    ],
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-template-expression": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    "typescript/non-nullable-type-assertion-style": "error",
+    "typescript/prefer-nullish-coalescing": "error",
+    "typescript/prefer-optional-chain": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/return-await": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/prefer-reduce-type-parameter": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/prefer-string-replace-all": "error",
+    "unicorn/prefer-string-starts-ends-with": "error",
+    "unicorn/prefer-string-slice": "error",
+    "unicorn/prefer-array-flat-map": "error",
+    "unicorn/prefer-array-find": "error",
+    "unicorn/prefer-includes": "error",
+    "unicorn/prefer-set-has": "error",
+    "unicorn/prefer-spread": "error",
+    "unicorn/prefer-at": "error",
+    "unicorn/prefer-optional-catch-binding": "error",
+    "unicorn/no-array-for-each": "error",
+    "unicorn/no-useless-spread": "error",
+    "unicorn/no-lonely-if": "error",
+    "unicorn/no-instanceof-array": "error",
+    "unicorn/throw-new-error": "error",
+    "unicorn/explicit-length-check": "error",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "import/no-self-import": "error",
+    "import/first": "error",
+    "no-await-in-loop": "off",
+    "oxc/no-map-spread": "off",
+    "no-redeclare": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "unicorn/prefer-regexp-test": "off",
+    "typescript/consistent-return": "off"
   },
   "ignorePatterns": [
-    "node_modules/**"
+    "node_modules/**",
+    "dist/**",
+    "examples/**",
+    ".verdict/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "test/**",
+        "scripts/**"
+      ],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-explicit-any": "off"
+      }
+    }
   ]
 }

@@ -17,7 +17,9 @@ const canUnix = (() => {
 // An upstream that echoes what it receives, standing in for an allowed host.
 async function echoServer(): Promise<{ port: number; close: () => void }> {
   const s = createServer((c) => c.pipe(c));
-  await new Promise<void>((r) => s.listen(0, "127.0.0.1", () => r()));
+  await new Promise<void>((r) => {
+    s.listen(0, "127.0.0.1", () => r());
+  });
   return { port: (s.address() as { port: number }).port, close: () => s.close() };
 }
 

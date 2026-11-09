@@ -3,7 +3,7 @@
 // refuses everything else, including plain HTTP. It listens on 127.0.0.1 (the
 // sandbox on macOS may reach that one port) and on a unix socket (for Linux,
 // where the sandbox has its own network namespace and a forwarder inside it).
-import { connect, createServer, type Server, type Socket } from "node:net";
+import { connect, createServer, type ListenOptions, type Server, type Socket } from "node:net";
 
 export interface Egress {
   port: number;
@@ -34,7 +34,7 @@ export async function startEgress(hosts: string[], socketPath?: string, ports = 
       const upstream = connect(port, host, () => {
         client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
         const rest = head.subarray(end + 4);
-        if (rest.length) upstream.write(rest);
+        if (rest.length > 0) upstream.write(rest);
         upstream.pipe(client);
         client.pipe(upstream);
       });
@@ -46,18 +46,34 @@ export async function startEgress(hosts: string[], socketPath?: string, ports = 
     client.on("data", onData);
     client.on("error", () => client.destroy());
   };
-  const listen = (server: Server, ...args: unknown[]) =>
-    new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      (server.listen as (...a: unknown[]) => void)(...args, () => resolve());
-    });
-  const servers = [createServer(handle)];
-  await listen(servers[0]!, 0, "127.0.0.1");
+  const tcp = createServer(handle);
+  await listen(tcp, { port: 0, host: "127.0.0.1" });
+  const servers = [tcp];
   if (socketPath) {
-    servers.push(createServer(handle));
-    await listen(servers[1]!, socketPath);
+    const unix = createServer(handle);
+    await listen(unix, { path: socketPath });
+    servers.push(unix);
   }
-  const port = (servers[0]!.address() as { port: number }).port;
-  const shut = (s: Server) => new Promise<void>((r) => s.close(() => r()));
-  return { port, socketPath, close: async () => void (await Promise.all(servers.map(shut))) };
+  const address = tcp.address();
+  if (!address || typeof address === "string") throw new Error("the egress proxy didn't get a TCP port: run verdict again");
+  return {
+    port: address.port,
+    socketPath,
+    close: async () => {
+      await Promise.all(servers.map(shut));
+    },
+  };
+}
+
+function listen(server: Server, options: ListenOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options, resolve);
+  });
+}
+
+function shut(server: Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+  });
 }

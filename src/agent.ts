@@ -4,21 +4,19 @@
 // `submit` call. The agents' own built-in tools are switched off, so the same
 // confinement applies whichever agent runs.
 import { z } from "zod";
+import { errorMessage } from "./fsx.ts";
 
-export interface Tool {
+export interface Tool<S extends z.ZodObject = z.ZodObject> {
   description: string;
-  schema: z.ZodObject;
-  execute: (input: never) => Promise<string>;
+  schema: S;
+  // A method, so a Tool of any schema is a Tool: callTool parses its input
+  // against `schema` before calling it.
+  execute(input: z.infer<S>): Promise<string>;
 }
 export type Tools = Record<string, Tool>;
 
-export function defineTool<S extends z.ZodObject>(t: {
-  description: string;
-  schema: S;
-  execute: (input: z.infer<S>) => Promise<string>;
-}): Tool {
-  return t as unknown as Tool;
-}
+// Infers the input type of `execute` from the schema.
+export const defineTool = <S extends z.ZodObject>(t: Tool<S>): Tool<S> => t;
 
 // Validates the agent's input against the schema, then runs the tool. Errors
 // come back as text for the agent to read, never as exceptions.
@@ -26,13 +24,23 @@ export async function callTool(tool: Tool, input: unknown): Promise<{ text: stri
   const parsed = tool.schema.safeParse(input);
   if (!parsed.success) return { text: `invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
   try {
-    return { text: await tool.execute(parsed.data as never), isError: false };
+    return { text: await tool.execute(parsed.data), isError: false };
   } catch (err) {
-    return { text: err instanceof Error ? err.message : String(err), isError: true };
+    return { text: errorMessage(err), isError: true };
   }
 }
 
-export type Reasoning = "low" | "medium" | "high";
+export const REASONING = ["low", "medium", "high"] as const;
+export type Reasoning = (typeof REASONING)[number];
+
+// VERDICT_REASONING, when it's set.
+function reasoningFromEnv(): Reasoning | undefined {
+  const value = process.env.VERDICT_REASONING;
+  if (value === undefined || value === "") return undefined;
+  const known = REASONING.find((r) => r === value);
+  if (!known) throw new Error(`VERDICT_REASONING=${value} isn't a reasoning level: set it to one of ${REASONING.join(", ")}, or unset it`);
+  return known;
+}
 
 export interface AgentTask {
   system: string;
@@ -103,7 +111,7 @@ export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Pr
     },
   });
   const agent = await pickAgent();
-  let failure: unknown = null;
+  let failure: Error | null = null;
   try {
     await agent.run({
       system: `${opts.system}\n\nUse only the tools provided. Finish by calling submit; once it is accepted, stop.`,
@@ -111,11 +119,11 @@ export async function runAgent<S extends z.ZodObject>(opts: AgentOptions<S>): Pr
       tools: { ...opts.tools, submit },
       cwd: opts.cwd,
       maxSteps: opts.maxSteps ?? 40,
-      reasoning: (process.env.VERDICT_REASONING as Reasoning | undefined) ?? opts.reasoning ?? "medium",
+      reasoning: reasoningFromEnv() ?? opts.reasoning ?? "medium",
       model: process.env.VERDICT_MODEL,
     });
   } catch (err) {
-    failure = err;
+    failure = err instanceof Error ? err : new Error(String(err));
   }
   // An agent that doesn't wait for its own tool calls can finish while a
   // submit is still being validated: let it settle first.

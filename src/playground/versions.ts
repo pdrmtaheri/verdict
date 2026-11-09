@@ -5,7 +5,7 @@
 // target), and looks there. Laws, enforcers, breaks and the lock are shared.
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { inside } from "../tools.ts";
+import { inside } from "../fsx.ts";
 import type { Manifest } from "./manifest.ts";
 
 export const MAIN = "main";
@@ -21,7 +21,7 @@ export const codeDirs = (m: Manifest): string[] => m.writable.filter((d) => d !=
 export function versionList(root: string, m: Manifest): VersionInfo[] {
   const list: VersionInfo[] = [{ id: MAIN, label: m.main?.label ?? "main", note: m.main?.note ?? "" }];
   const dir = join(root, "versions");
-  const onDisk = existsSync(dir) ? readdirSync(dir).filter((n) => statSync(join(dir, n)).isDirectory()).sort() : [];
+  const onDisk = existsSync(dir) ? readdirSync(dir).filter((n) => statSync(join(dir, n)).isDirectory()).toSorted() : [];
   const declared = m.versions ?? [];
   for (const v of declared) if (onDisk.includes(v.id)) list.push({ id: v.id, label: v.label ?? v.id, note: v.note ?? "" });
   for (const id of onDisk) if (!list.some((v) => v.id === id)) list.push({ id, label: id, note: "" });

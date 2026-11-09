@@ -31,7 +31,7 @@ function project() {
 async function planWith(root: string, calls: { tool: string; input: unknown }[]) {
   const model = scriptedAgent(calls);
   agents.agent = model;
-  const ok = await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {});
+  const ok = await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, () => {});
   delete agents.agent;
   return { ok, said: model.results.join("\n") };
 }
@@ -44,7 +44,7 @@ test("a law can be enforced by one test the repo already has, which stays where 
   expect(e).toMatchObject(enforcer);
   expect(Object.keys(e.inputs!)).toContain("tests/money.test.ts");
   expect(readFileSync(join(root, "tests/money.test.ts"), "utf8")).toBe(TESTS);
-  expect((await check(at(root), [law!], readLock(join(root, "VERDICT.lock"))))[0]!.status).toBe("pass");
+  expect((await check({ ...at(root), laws: [law!], lock: readLock(join(root, "VERDICT.lock")) }))[0]!.status).toBe("pass");
 });
 
 test("its break must change the code, not the test", async () => {
@@ -59,7 +59,7 @@ test("skipping the test fails the law, though the runner exits 0", async () => {
   const root = project();
   await planWith(root, [{ tool: "submit", input: { enforcers: [enforcer], breaks: [brk], suggestions: [] } }]);
   writeFileSync(join(root, "tests/money.test.ts"), TESTS.replace('test("stores cents"', 'test.skip("stores cents"'));
-  const r = (await check(at(root), [law!], readLock(join(root, "VERDICT.lock"))))[0]!;
+  const r = (await check({ ...at(root), laws: [law!], lock: readLock(join(root, "VERDICT.lock")) }))[0]!;
   expect(r.status).toBe("fail");
   expect(r.details[0]!.result.message).toContain("ran no tests");
 });

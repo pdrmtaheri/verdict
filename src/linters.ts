@@ -7,6 +7,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import type { ExecResult } from "./exec.ts";
+import { z } from "zod";
 import { fail, inconclusive, pass, type Result } from "./result.ts";
 
 export interface LintContext {
@@ -34,13 +35,31 @@ interface Linter {
   findings: (ctx: LintContext, exe: string, files: string[]) => Promise<{ found: Finding[]; suppressed: number } | Result>;
 }
 
-const parse = (r: ExecResult): unknown => {
+// A linter's JSON report, read as `schema`; null if it printed something else.
+function parse<S extends z.ZodType>(r: ExecResult, schema: S): z.infer<S> | null {
+  let json: unknown;
   try {
-    return JSON.parse(r.stdout);
+    json = JSON.parse(r.stdout);
   } catch {
     return null;
   }
-};
+  const parsed = schema.safeParse(json);
+  return parsed.success ? parsed.data : null;
+}
+
+const EslintReport = z.array(
+  z.object({
+    filePath: z.string(),
+    messages: z.array(z.object({ ruleId: z.string().nullable(), line: z.number(), message: z.string() })),
+    suppressedMessages: z.array(z.object({ ruleId: z.string().nullable() })).optional(),
+  }),
+);
+const RuffReport = z.array(z.object({ code: z.string().nullable(), filename: z.string(), location: z.object({ row: z.number() }), message: z.string() }));
+const OxlintRules = z.record(z.string(), z.unknown());
+const OxlintConfig = z.object({ rules: OxlintRules.optional(), overrides: z.array(z.object({ files: z.array(z.string()), rules: OxlintRules.optional() })).optional() });
+const OxlintReport = z.object({
+  diagnostics: z.array(z.object({ code: z.string(), filename: z.string(), message: z.string(), labels: z.array(z.object({ span: z.object({ line: z.number() }) })).optional() })),
+});
 
 const ESLINT_PROBE = `
 const [config, rule, ...files] = process.argv.slice(1);
@@ -73,13 +92,12 @@ const eslint: Linter = {
     // makes require("eslint") find it, after any node_modules from root up.
     const modules = dirname(dirname(dirname(realpathSync(exe))));
     const r = await ctx.run([node, "-e", ESLINT_PROBE, "--", ctx.config, ctx.rule, ...files], { NODE_PATH: modules });
-    const out = r.code === 0 ? parse(r) : null;
-    return Array.isArray(out) ? (out as string[]) : null;
+    return r.code === 0 ? parse(r, z.array(z.string())) : null;
   },
   async findings(ctx, exe, files) {
     const r = await ctx.run([exe, "--config", ctx.config, "--format", "json", "--no-warn-ignored", ...files.map((f) => `./${f}`)]);
-    const out = parse(r) as { filePath: string; messages: { ruleId: string | null; line: number; message: string }[]; suppressedMessages?: { ruleId: string | null }[] }[] | null;
-    if (!Array.isArray(out)) return inconclusive(`eslint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
+    const out = parse(r, EslintReport);
+    if (!out) return inconclusive(`eslint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
     const found = out.flatMap((f) => f.messages.filter((m) => m.ruleId === ctx.rule).map((m) => ({ file: f.filePath, line: m.line, message: m.message })));
     const suppressed = out.reduce((n, f) => n + (f.suppressedMessages ?? []).filter((m) => m.ruleId === ctx.rule).length, 0);
     return { found, suppressed };
@@ -108,8 +126,8 @@ const ruff: Linter = {
   },
   async findings(ctx, exe, files) {
     const r = await ctx.run([exe, "check", "--config", ctx.config, "--output-format", "json", "--no-fix", "--exit-zero", ...files.map((f) => `./${f}`)]);
-    const out = parse(r) as { code: string | null; filename: string; location: { row: number }; message: string }[] | null;
-    if (!Array.isArray(out)) return inconclusive(`ruff exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
+    const out = parse(r, RuffReport);
+    if (!out) return inconclusive(`ruff exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
     // ruff doesn't report what `# noqa` suppressed.
     return { found: out.filter((f) => f.code === ctx.rule).map((f) => ({ file: f.filename, line: f.location.row, message: f.message })), suppressed: 0 };
   },
@@ -156,7 +174,7 @@ const oxlint: Linter = {
   // and --debug files says which files oxlint would lint at all.
   async off(ctx, exe, files) {
     const printed = await ctx.run([exe, "-c", ctx.config, "--print-config"]);
-    const cfg = printed.code === 0 ? (parse(printed) as { rules?: Record<string, unknown>; overrides?: { files: string[]; rules?: Record<string, unknown> }[] } | null) : null;
+    const cfg = printed.code === 0 ? parse(printed, OxlintConfig) : null;
     if (!cfg?.rules) return null;
     const want = oxRule(ctx.rule);
     const level = (rules: Record<string, unknown> = {}) => Object.entries(rules).find(([k]) => oxRule(k) === want)?.[1];
@@ -179,8 +197,8 @@ const oxlint: Linter = {
   },
   async findings(ctx, exe, files) {
     const r = await ctx.run([exe, "-c", ctx.config, "--format", "json", ...files.map((f) => `./${f}`)]);
-    const out = parse(r) as { diagnostics?: { code: string; filename: string; message: string; labels?: { span: { line: number } }[] }[] } | null;
-    if (!out || !Array.isArray(out.diagnostics)) return inconclusive(`oxlint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
+    const out = parse(r, OxlintReport);
+    if (!out) return inconclusive(`oxlint exited ${r.code} without a report, so verdict can't read its findings. Fix the error below, then run verdict check again\n${r.output.split("\n").slice(-15).join("\n")}`);
     const want = oxRule(ctx.rule);
     const found = out.diagnostics.filter((d) => oxRule(d.code) === want).map((d) => ({ file: d.filename, line: d.labels?.[0]?.span.line ?? 0, message: d.message }));
     return { found, suppressed: disables(ctx.root, files, ctx.rule) };
@@ -199,7 +217,7 @@ export function scopeFiles(root: string, scope: string): string[] {
       if (!/(^|\/)(node_modules|\.git|\.venv|venv)\//.test(f)) files.add(f);
     }
   }
-  return [...files].sort();
+  return [...files].toSorted();
 }
 
 export async function runLint(ctx: LintContext, warn: (w: string) => void): Promise<Result> {

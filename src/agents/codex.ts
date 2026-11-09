@@ -28,13 +28,16 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { callTool, type Agent, type AgentTask } from "../agent.ts";
+import { errorMessage } from "../fsx.ts";
 import { startEgress } from "./egress.ts";
 import { sandboxed } from "../sandbox.ts";
 import { bunCommand } from "../runtime.ts";
-// @ts-ignore: with type "text", the import is the file's source, not its module
+// @ts-expect-error: with type "text", the import is the file's source, not its module
+// oxlint-disable-next-line import/default -- a text import has no module exports
 import forwarderSource from "./netns-forward.ts" with { type: "text" };
 
-const FORWARDER = forwarderSource as unknown as string;
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see the import above
+const FORWARDER = forwarderSource as string;
 
 // Where Codex may connect: the ChatGPT backend it uses with a ChatGPT login,
 // the OpenAI API (API-key logins), and token refresh.
@@ -108,7 +111,7 @@ async function launch(cwd: string): Promise<Launched> {
       // runs the same from a checkout and from a compiled verdict.
       const forward = join(work, "netns-forward.ts");
       writeFileSync(forward, FORWARDER, { mode: 0o600 });
-      const bun = bunCommand(null)!;
+      const bun = bunCommand(null);
       const wrapped = sandboxed(
         [bun.bin, forward, egress.socketPath!, String(egress.port), "--", bin, "app-server"],
         { ...box, env: { ...box.env, ...bun.env }, readable: [...box.readable, ...bun.readable], writable: [...box.writable, work] },
@@ -131,13 +134,24 @@ function loginChanged(before: string, copyPath: string): boolean {
   }
 }
 
-type Message = { id?: number | string; method?: string; params?: any; result?: any; error?: { code?: number; message?: string } };
+interface Message {
+  id?: number | string;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: { code?: number; message?: string };
+}
+
+// The parts of Codex's messages verdict reads.
+const ToolCall = z.object({ tool: z.string(), arguments: z.unknown() });
+const ErrorNotice = z.object({ willRetry: z.boolean().optional(), error: z.unknown().optional() });
+const ThreadStarted = z.object({ thread: z.object({ id: z.string() }) });
 
 class Connection {
   private proc!: Bun.Subprocess<"pipe", "pipe", "pipe">;
   private cleanup: () => Promise<void> = async () => {};
   private next = 1;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private stderr = "";
 
   constructor(
@@ -153,20 +167,23 @@ class Connection {
     void (async () => {
       for await (const chunk of this.proc.stderr) this.stderr = (this.stderr + new TextDecoder().decode(chunk)).slice(-4000);
     })();
-    void this.proc.exited.then((code) => {
+    void (async () => {
+      const code = await this.proc.exited;
       for (const p of this.pending.values()) p.reject(new Error(`codex app-server exited (${code}): ${this.stderr.trim().split("\n").at(-1) ?? ""}. Check that \`codex\` runs and is logged in (run \`codex login\`), then run verdict again`));
       this.pending.clear();
-    });
+    })();
   }
 
   private send(m: object) {
-    this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
+    void this.proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...m })}\n`);
   }
 
-  request(method: string, params: unknown): Promise<any> {
+  request(method: string, params: unknown): Promise<unknown> {
     const id = this.next++;
     this.send({ id, method, params });
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+    });
   }
 
   private async read() {
@@ -177,6 +194,8 @@ class Connection {
       while ((nl = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
+        // The app-server's own output: trusted to be JSON-RPC, as Codex documents it.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         if (line) void this.handle(JSON.parse(line) as Message);
       }
     }
@@ -187,13 +206,14 @@ class Connection {
       try {
         this.send({ id: m.id, result: (await this.onRequest(m)) ?? null });
       } catch (err) {
-        this.send({ id: m.id, error: { code: -32601, message: (err as Error).message } });
+        this.send({ id: m.id, error: { code: -32601, message: errorMessage(err) } });
       }
     } else if (m.method) {
       this.onNotification(m);
     } else if (typeof m.id === "number" && this.pending.has(m.id)) {
-      const p = this.pending.get(m.id)!;
+      const p = this.pending.get(m.id);
       this.pending.delete(m.id);
+      if (!p) return;
       if (m.error) p.reject(new Error(`codex: ${m.error.message ?? `error ${m.error.code}`}. Update the Codex CLI if verdict's request isn't supported, or set VERDICT_AGENT=claude-code or pi`));
       else p.resolve(m.result);
     }
@@ -210,9 +230,7 @@ export const codex: Agent = {
   name: "codex",
   async run(task: AgentTask) {
     let steps = 0;
-    let done!: () => void;
-    let failed!: (e: Error) => void;
-    const finished = new Promise<void>((resolve, reject) => ((done = resolve), (failed = reject)));
+    const { promise: finished, resolve: done, reject: failed } = Promise.withResolvers<void>();
 
     const launched = await (testing.launch ?? launch)(task.cwd);
     let conn: Connection;
@@ -222,12 +240,13 @@ export const codex: Agent = {
       launched,
       async (m) => {
         if (m.method === "item/tool/call") {
-          const tool = task.tools[m.params.tool];
-          if (!tool) return { contentItems: [{ type: "inputText", text: `no tool named ${m.params.tool}` }], success: false };
+          const call = ToolCall.parse(m.params);
+          const tool = task.tools[call.tool];
+          if (!tool) return { contentItems: [{ type: "inputText", text: `no tool named ${call.tool}` }], success: false };
           if (++steps > task.maxSteps) {
             return { contentItems: [{ type: "inputText", text: "step limit reached: call submit now, or stop" }], success: false };
           }
-          const r = await callTool(tool, m.params.arguments);
+          const r = await callTool(tool, call.arguments);
           return { contentItems: [{ type: "inputText", text: r.text }], success: !r.isError };
         }
         // Anything off Codex's safe read-only list asks first; verdict refuses it all.
@@ -237,7 +256,9 @@ export const codex: Agent = {
       },
       (m) => {
         if (m.method === "turn/completed") done();
-        if (m.method === "error" && m.params?.willRetry === false) failed(new Error(`codex stopped: ${JSON.stringify(m.params.error ?? m.params)}. Run verdict again; if it keeps failing, check \`codex\` on its own or set VERDICT_AGENT=claude-code or pi`));
+        if (m.method !== "error") return;
+        const notice = ErrorNotice.safeParse(m.params);
+        if (notice.success && notice.data.willRetry === false) failed(new Error(`codex stopped: ${JSON.stringify(notice.data.error ?? m.params)}. Run verdict again; if it keeps failing, check \`codex\` on its own or set VERDICT_AGENT=claude-code or pi`));
       },
       );
     } catch (err) {
@@ -246,7 +267,7 @@ export const codex: Agent = {
     }
     try {
       await conn.request("initialize", { clientInfo: { name: "verdict", version: "0.0.0", title: null }, capabilities: { experimentalApi: true } });
-      const thread = await conn.request("thread/start", {
+      const thread = ThreadStarted.parse(await conn.request("thread/start", {
         cwd: task.cwd,
         ...(task.model ? { model: task.model } : {}),
         // "untrusted": only Codex's safe read-only commands run without asking.
@@ -262,7 +283,7 @@ export const codex: Agent = {
           description: t.description,
           inputSchema: z.toJSONSchema(t.schema),
         })),
-      });
+      }));
       await conn.request("turn/start", {
         threadId: thread.thread.id,
         input: [{ type: "text", text: task.prompt, text_elements: [] }],

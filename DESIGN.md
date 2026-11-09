@@ -333,6 +333,16 @@ person to act on, and they never go in the lock:
 
 TypeScript on Bun. `bun src/cli.ts plan|check [path...]`.
 
+Where things live in `src/`: `sets.ts` finds VERDICT.md files and reads each
+directory's laws and lock; `plan.ts` and `check.ts` take those as one value.
+`enforcers.ts` is the one module that knows the enforcer kinds: how each runs
+(`runEnforcer(enforcer, site)`, where a `RunSite` says where, on which
+target and in which sandbox) and what the planner may submit for each
+(`vet`). `breaks.ts` applies breaks on a scratch copy, `pins.ts` records what
+an enforcer was proven against, and `reprove.ts` decides whether a planned
+law is still in sync. Path and filesystem primitives (`inside`, `findBin`,
+`listFiles`…) are in `fsx.ts`; prompts are Markdown files in `src/prompts/`.
+
 verdict runs its agents (the planner and the LLM judge) on a coding agent the
 user already has and is logged into, the way bb does: no model API keys and no
 AI library in between. `VERDICT_AGENT` picks one, and `VERDICT_MODEL` is that

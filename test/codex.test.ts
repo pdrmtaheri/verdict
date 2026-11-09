@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { runAgent } from "../src/agent.ts";
 import { testing } from "../src/agents/codex.ts";
+import { rejectsWith } from "./rejects.ts";
 
 // A fake `codex app-server`: answers the handshake, then calls verdict's
 // submit tool and asks to run a command, and records what verdict answered.
@@ -73,5 +74,5 @@ test("codex: verdict refuses to start Codex without its sandbox", async () => {
   process.env.VERDICT_SANDBOX = "off";
   process.env.VERDICT_AGENT = "codex";
   const run = runAgent({ system: "s", prompt: "p", tools: {}, cwd: ".", submit: { description: "submit", schema: z.object({}) } });
-  await expect(run).rejects.toThrow("set VERDICT_AGENT=claude-code or pi");
+  await rejectsWith(run, "set VERDICT_AGENT=claude-code or pi");
 });

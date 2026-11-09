@@ -7,8 +7,10 @@ import { parseLaws } from "../src/laws.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";
 import { overrides } from "../src/models.ts";
 import { overrides as agents } from "../src/agent.ts";
-import { inside } from "../src/tools.ts";
+import { stampModels } from "../src/specbind.ts";
+import { inside } from "../src/fsx.ts";
 import { at } from "../src/where.ts";
+import { rejectsWith } from "./rejects.ts";
 import { repo, scriptedAgent } from "./helpers.ts";
 
 afterEach(() => {
@@ -47,7 +49,7 @@ test("unplanned laws fail the check; inconclusive ones don't", async () => {
   const laws = parseLaws(`- ${law}\n- Another law.`);
   const lock: Lock = new Map([[laws[0]!.hash, { law, enforcers: [{ kind: "semgrep", path: ".verdict/r.yml" }] }]]);
   const root = repo({ ".verdict/r.yml": "rules: []\n" });
-  const reports = await check(at(root), laws, lock);
+  const reports = await check({ ...at(root), laws: laws, lock: lock });
   expect(reports.map((r) => r.status)).toEqual([Bun.which("semgrep") ? reports[0]!.status : "inconclusive", "unplanned"]);
   expect(exitCode(reports)).toBe(1);
   expect(exitCode(reports.slice(0, 1).map((r) => ({ ...r, status: "inconclusive" as const })))).toBe(0);
@@ -127,10 +129,10 @@ test("the planner may run its own scripts in .verdict/, but nothing else outside
   const { writeTools } = await import("../src/tools.ts");
   const root = repo({ ".verdict/t.sh": "#!/bin/sh\necho hi\n", "evil.sh": "#!/bin/sh\necho no\n" }, [".verdict/t.sh", "evil.sh"]);
   const run = writeTools(root, join(root, ".verdict")).run;
-  const call = (argv: string[]) => run.execute({ argv } as never);
+  const call = (argv: string[]) => run.execute({ argv });
   expect(await call(["./.verdict/t.sh"])).toContain("hi");
-  await expect(call(["./evil.sh"])).rejects.toThrow("outside .verdict");
-  await expect(call(["curl", "example.com"])).rejects.toThrow("not allowed");
+  await rejectsWith(call(["./evil.sh"]), "outside .verdict");
+  await rejectsWith(call(["curl", "example.com"]), "not allowed");
 });
 
 test("grep skips tracked symlinks that point outside the repo; git rejects writing flags", async () => {
@@ -143,13 +145,13 @@ test("grep skips tracked symlinks that point outside the repo; git rejects writi
   Bun.spawnSync(["git", "init", "-q"], { cwd: root });
   Bun.spawnSync(["git", "add", "-A"], { cwd: root });
   const tools = readTools(root);
-  expect(await tools.list_files.execute({} as never)).toContain("link.txt");
-  expect(await tools.grep.execute({ pattern: "TOKEN" } as never)).toBe("(no matches)");
-  await expect(tools.git.execute({ args: ["diff", "--output=/tmp/x"] } as never)).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] } as never)).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["blame", "--ignore-revs-file=/etc/hosts", "a.txt"] } as never)).rejects.toThrow("not allowed");
-  await expect(tools.git.execute({ args: ["diff", outside] } as never)).rejects.toThrow("outside");
-  expect(await tools.git.execute({ args: ["ls-files", "a.txt"] } as never)).toContain("a.txt");
+  expect(await tools.list_files.execute({})).toContain("link.txt");
+  expect(await tools.grep.execute({ pattern: "TOKEN" })).toBe("(no matches)");
+  await rejectsWith(tools.git.execute({ args: ["diff", "--output=/tmp/x"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["diff", "--no-index", "/etc/hosts", "a.txt"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["blame", "--ignore-revs-file=/etc/hosts", "a.txt"] }), "not allowed");
+  await rejectsWith(tools.git.execute({ args: ["diff", outside] }), "outside");
+  expect(await tools.git.execute({ args: ["ls-files", "a.txt"] })).toContain("a.txt");
 });
 
 test("tool input is validated before a tool runs, whichever agent calls it", async () => {
@@ -165,19 +167,23 @@ test("tool input is validated before a tool runs, whichever agent calls it", asy
   expect(await callTool(boom, {})).toEqual({ text: "nope", isError: true });
 });
 
+// A spec must name the code it models, stamped with its hash, or it is stale.
+const counterSpec = (inv: string) => `---- MODULE Counter ----\n\\* models: counter.js\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
+
 // Runs only where TLC is available (tlc on PATH or VERDICT_TLA2TOOLS / the TLA+ Toolbox's jar).
 const toolboxJar = "/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar";
 const tlcAvailable = !!Bun.which("tlc") || !!process.env.VERDICT_TLA2TOOLS || (await Bun.file(toolboxJar).exists());
 test.skipIf(!tlcAvailable)("a TLA+ enforcer passes when its invariant holds and fails when it's violated", async () => {
   const saved = process.env.VERDICT_TLA2TOOLS;
   if (!Bun.which("tlc") && !saved) process.env.VERDICT_TLA2TOOLS = toolboxJar;
-  const spec = (inv: string) => `---- MODULE Counter ----\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
   try {
-    const ok = repo({ ".verdict/Counter.tla": spec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const ok = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": counterSpec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    stampModels(ok, ".verdict/Counter.tla");
     const okR = await checkLaw(at(ok), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] });
     expect(okR.details[0]!.result.message).not.toContain("Cannot find source file");
     expect(okR.status).toBe("pass");
-    const bad = repo({ ".verdict/Counter.tla": spec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const bad = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": counterSpec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    stampModels(bad, ".verdict/Counter.tla");
     expect((await checkLaw(at(bad), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] })).status).toBe("fail");
   } finally {
     if (saved === undefined) delete process.env.VERDICT_TLA2TOOLS;

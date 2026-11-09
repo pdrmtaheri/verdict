@@ -29,7 +29,7 @@ export function parseLaws(markdown: string): Law[] {
 }
 
 export function normalise(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replaceAll(/\s+/g, " ").trim();
 }
 
 export function hashLaw(text: string): string {

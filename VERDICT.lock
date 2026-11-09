@@ -11,7 +11,7 @@
         covered
       inputs:
         .verdict/src-provider-boundary.test.ts: 40c57e6f6bd9
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 539d28d7:
   law: An agent's file tools never read or write outside the repository; the
     planner never writes to the repository outside .verdict/, and anything it
@@ -21,16 +21,16 @@
       inputs:
         .verdict/agent-read-boundary.test.ts: e152a1aa0707
         .verdict/agent-builtin-tools.judge.md: 378ff2b62234
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - test: .verdict/planner-scratch-boundary.test.ts
       inputs:
         .verdict/planner-scratch-boundary.test.ts: dffe1c77700a
-        .verdict/planner-sandbox.judge.md: 243ff98c3880
+        .verdict/planner-sandbox.judge.md: a405f32d39e2
         .verdict/agent-builtin-tools.judge.md: 378ff2b62234
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - llm: .verdict/planner-sandbox.judge.md
       inputs:
-        .verdict/planner-sandbox.judge.md: 243ff98c3880
+        .verdict/planner-sandbox.judge.md: a405f32d39e2
         .verdict/planner-scratch-boundary.test.ts: dffe1c77700a
         .verdict/agent-builtin-tools.judge.md: 378ff2b62234
     - llm: .verdict/agent-builtin-tools.judge.md
@@ -44,14 +44,14 @@
     - test: .verdict/check-exit-code.test.ts
       inputs:
         .verdict/check-exit-code.test.ts: 69804935e41c
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 a3b28a29:
   law: Error messages tell the user what to do next.
   enforcers:
     - test: .verdict/error-next-step-cli.test.ts
       inputs:
         .verdict/error-next-step-cli.test.ts: fc57d1195171
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - llm: .verdict/error-messages-next-step.judge.md
       inputs:
         .verdict/error-messages-next-step.judge.md: 3318db218d4d
@@ -64,15 +64,15 @@ f25eb789:
     - test: .verdict/submit-first-wins.test.ts
       inputs:
         .verdict/submit-first-wins.test.ts: 20821a8178ed
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - test: .verdict/submit-schedules.test.ts
       inputs:
         .verdict/submit-schedules.test.ts: 9037b871fd4a
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - test: .verdict/submit-agent-throws.test.ts
       inputs:
         .verdict/submit-agent-throws.test.ts: 95d95a55f018
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 21becdf0:
   law: However `verdict plan` is interrupted, and in whatever order laws are
     added, reworded or removed, VERDICT.lock only holds entries for laws
@@ -82,8 +82,8 @@ f25eb789:
     - test: .verdict/plan-interrupt-lock.test.ts
       inputs:
         .verdict/plan-interrupt-lock.test.ts: a40a8f4c7c41
-        .verdict/plan-interrupt-runner.ts: d0e590ef5d02
-        bunfig.toml: e8acd4c297ca
+        .verdict/plan-interrupt-runner.ts: 25c2b4bfdda2
+        bunfig.toml: a7cb2619e020
 3d2d5b60:
   law: The egress proxy never opens a connection to a host or port outside its
     allowlist, however the request is split across packets, cased or padded.
@@ -91,7 +91,7 @@ f25eb789:
     - test: .verdict/egress-allowlist.test.ts
       inputs:
         .verdict/egress-allowlist.test.ts: b471bb508543
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 10a12de4:
   law: "`verdict check` never changes the repository: after it runs, git status
     and the contents of every file are what they were before."
@@ -99,15 +99,15 @@ f25eb789:
     - test: .verdict/check-read-only.test.ts
       inputs:
         .verdict/check-read-only.test.ts: ba9cc54c4048
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 23a2e318:
   law: "`verdict plan` on a repo whose laws are all in sync, with every break
     still caught, finishes without starting a coding agent."
   enforcers:
     - test: .verdict/plan-in-sync-no-agent.test.ts
       inputs:
-        .verdict/plan-in-sync-no-agent.test.ts: caf1ad3d35d7
-        bunfig.toml: e8acd4c297ca
+        .verdict/plan-in-sync-no-agent.test.ts: 4267247de7a6
+        bunfig.toml: a7cb2619e020
 44811e1b:
   law: Re-wrapping or re-indenting a law in VERDICT.md never makes `verdict check`
     report it as not planned; changing any of its words does.
@@ -115,7 +115,7 @@ f25eb789:
     - test: .verdict/rewrap-hash.test.ts
       inputs:
         .verdict/rewrap-hash.test.ts: 5a84fc731123
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
 39f2d5d6:
   law: "verdict never runs a string as JavaScript: no eval() and no Function
     constructor anywhere in src/."
@@ -124,9 +124,9 @@ f25eb789:
       inputs:
         .verdict/no-eval.sh: 1c40d7480144
         .verdict/no-eval.json: fcafdd16595f
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020
     - test: .verdict/no-dynamic-code-scan.test.ts
       inputs:
         .verdict/no-dynamic-code-scan.test.ts: 19dbddc3b528
         .verdict/no-eval.sh: 1c40d7480144
-        bunfig.toml: e8acd4c297ca
+        bunfig.toml: a7cb2619e020

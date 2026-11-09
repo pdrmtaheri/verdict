@@ -8,8 +8,8 @@
 export const COMPILED = Bun.main.startsWith("/$bunfs/") || /^[A-Za-z]:[\\/]~BUN[\\/]/.test(Bun.main);
 
 // How to run Bun: the one on PATH, or else this executable itself, which
-// behaves as the Bun CLI when BUN_BE_BUN is set. null if there is neither.
-export function bunCommand(onPath: string | null): { bin: string; env: Record<string, string>; readable: string[] } | null {
+// behaves as the Bun CLI when BUN_BE_BUN is set.
+export function bunCommand(onPath: string | null): { bin: string; env: Record<string, string>; readable: string[] } {
   if (onPath) return { bin: onPath, env: {}, readable: [] };
   // Only the executable itself is readable in a sandbox, not the folder it's
   // in: that may be ~/Downloads, or home itself.

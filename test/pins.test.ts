@@ -27,12 +27,12 @@ async function planned(): Promise<string> {
     { tool: "write_file", input: { path: ".verdict/cents.sh", content: SCRIPT, executable: true } },
     { tool: "submit", input: { enforcers: [enforcer], breaks: [brk], suggestions: [] } },
   ]);
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {})).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, () => {})).toBe(true);
   delete agents.agent;
   return root;
 }
 
-const run = async (root: string) => (await check(at(root), [law!], readLock(join(root, "VERDICT.lock"))))[0]!;
+const run = async (root: string) => (await check({ ...at(root), laws: [law!], lock: readLock(join(root, "VERDICT.lock")) }))[0]!;
 
 test("plan records what each enforcer was proven against", async () => {
   const root = await planned();
@@ -54,7 +54,7 @@ test("an enforcer weakened after it was proven fails check, though it still pass
 
 test("a harmless edit to an enforcer is replayed, passes, and is reported", async () => {
   const root = await planned();
-  writeFileSync(join(root, ".verdict/cents.sh"), SCRIPT + "# a comment\n");
+  writeFileSync(join(root, ".verdict/cents.sh"), `${SCRIPT  }# a comment\n`);
   const r = await run(root);
   expect(r.status).toBe("pass");
   const said = format([r]);
@@ -74,11 +74,11 @@ test("check warns when a break no longer applies to the code", async () => {
 test("an in-sync plan records new inputs without starting an agent", async () => {
   const root = await planned();
   const file = join(root, "VERDICT.lock");
-  writeFileSync(join(root, ".verdict/cents.sh"), SCRIPT + "# a comment\n");
+  writeFileSync(join(root, ".verdict/cents.sh"), `${SCRIPT  }# a comment\n`);
   const before = readLock(file).get(law!.hash)!.enforcers[0]!.inputs;
   let started = 0;
   agents.agent = { name: "counting", run: async () => void started++ };
-  expect(await plan(at(root), file, [law!], readLock(file), () => {})).toBe(true);
+  expect(await plan({ ...at(root), lockFile: file, laws: [law!], lock: readLock(file) }, () => {})).toBe(true);
   expect(started).toBe(0);
   const after = readLock(file).get(law!.hash)!.enforcers[0]!.inputs;
   expect(after).not.toEqual(before);
@@ -97,7 +97,7 @@ test("test inputs include the runner's config and its version", () => {
   const root = repo({ "package.json": JSON.stringify({ devDependencies: { vitest: "^3.0.0", lodash: "4" } }), "vitest.config.ts": "export default {}\n", "pkg/.verdict/a.test.ts": "// scope: x\n" });
   const w = { dir: join(root, "pkg"), repo: root };
   const inputs = inputsOf(w, { kind: "test", path: ".verdict/a.test.ts" });
-  expect(Object.keys(inputs).sort()).toEqual(["../package.json#vitest", "../vitest.config.ts", ".verdict/a.test.ts"]);
+  expect(Object.keys(inputs).toSorted()).toEqual(["../package.json#vitest", "../vitest.config.ts", ".verdict/a.test.ts"]);
   expect(changes(inputs, { ...inputs, "../package.json#vitest": "^4.0.0" })).toEqual(["../package.json: vitest went from ^3.0.0 to ^4.0.0"]);
 });
 
@@ -118,7 +118,7 @@ test("helpers an enforcer in .verdict/ names are among its inputs", () => {
     ".verdict/unrelated.ts": "",
     ".verdict/breaks/abc.json": "[]",
   });
-  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).sort()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
+  expect(Object.keys(inputsOf(at(root), { kind: "test", path: ".verdict/a.test.ts" })).toSorted()).toEqual([".verdict/a.test.ts", ".verdict/fixture.json", ".verdict/runner.ts"]);
 });
 
 test("a dangling link in .verdict/ doesn't break pinning", async () => {

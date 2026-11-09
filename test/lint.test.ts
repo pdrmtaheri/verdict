@@ -52,12 +52,12 @@ test.skipIf(!hasEslint)("plan accepts a rule the project has; check catches it b
   const root = js();
   const brk = { enforcer: "eslint.config.mjs", description: "declare with var", edits: [{ path: "src/a.js", find: "let a", replace: "var a" }] };
   agents.agent = scriptedAgent([{ tool: "submit", input: { enforcers: [enforcer], breaks: [brk], suggestions: [] } }]);
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {})).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, () => {})).toBe(true);
   const lock = readLock(join(root, "VERDICT.lock"));
   expect(lock.get(law!.hash)!.enforcers[0]).toMatchObject(enforcer);
-  expect((await check(at(root), [law!], lock))[0]!.status).toBe("pass");
+  expect((await check({ ...at(root), laws: [law!], lock: lock }))[0]!.status).toBe("pass");
   writeFileSync(join(root, "eslint.config.mjs"), ESLINT.replace('"no-var": "error"', '"no-var": "error", "eqeqeq": "warn"'));
-  const changed = (await check(at(root), [law!], lock))[0]!;
+  const changed = (await check({ ...at(root), laws: [law!], lock: lock }))[0]!;
   expect(changed.status).toBe("pass");
   expect(changed.details[0]!.warnings.join("\n")).toContain("eslint.config.mjs changed");
   expect(changed.details[0]!.warnings.join("\n")).toContain("still caught");
@@ -71,7 +71,7 @@ test("plan refuses a lint enforcer in .verdict/ or on a config it can't read", a
   ] as const) {
     const model = scriptedAgent([{ tool: "submit", input: { enforcers: [e], breaks: [], suggestions: [] } }]);
     agents.agent = model;
-    expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {})).toBe(false);
+    expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, () => {})).toBe(false);
     expect(model.results.join("\n")).toContain(said);
   }
 });
@@ -100,7 +100,7 @@ test.skipIf(!hasEslint)("eslint: a rule turned off for part of the scope fails t
 });
 
 test.skipIf(!hasRuff)("ruff: per-file-ignores for the rule fail the law", async () => {
-  const root = repo({ "pyproject.toml": PYPROJECT + '[tool.ruff.lint.per-file-ignores]\n"app/legacy/*.py" = ["E711"]\n', "app/a.py": "x = 1\n", "app/legacy/b.py": "x = None\nif x == None:\n    pass\n" });
+  const root = repo({ "pyproject.toml": `${PYPROJECT  }[tool.ruff.lint.per-file-ignores]\n"app/legacy/*.py" = ["E711"]\n`, "app/a.py": "x = 1\n", "app/legacy/b.py": "x = None\nif x == None:\n    pass\n" });
   const r = await lint(root, ruffE);
   expect(r.status).toBe("fail");
   expect(r.details[0]!.result.message).toContain("app/legacy/b.py (per-file-ignores)");
@@ -157,9 +157,9 @@ test("two rules of one oxlint config are two enforcers, each with its own break"
     { tool: "submit", input: { enforcers: [noVar, noAny], breaks, suggestions: [] } },
   ]);
   agents.agent = model;
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), () => {})).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, () => {})).toBe(true);
   expect(model.results[0]).toContain('break with enforcer ".oxlintrc.json#typescript/no-explicit-any"');
-  const r = (await check(at(root), [law!], readLock(join(root, "VERDICT.lock"))))[0]!;
+  const r = (await check({ ...at(root), laws: [law!], lock: readLock(join(root, "VERDICT.lock")) }))[0]!;
   expect(r.status).toBe("pass");
   expect(r.details.map((d) => d.id)).toEqual([".oxlintrc.json#no-var", ".oxlintrc.json#typescript/no-explicit-any"]);
 });

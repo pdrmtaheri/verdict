@@ -9,6 +9,9 @@ export interface Where {
   repo: string;
 }
 
+// Where a law's generated enforcers and breaks live, beside its VERDICT.md.
+export const OUT_DIR = ".verdict";
+
 // A relative path with "/" separators on every OS: what goes in a lock, a
 // report or anything else that's committed or compared across machines.
 export const posixRelative = (from: string, to: string): string => relative(from, to).split(sep).join("/");
