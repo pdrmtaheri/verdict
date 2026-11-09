@@ -67,6 +67,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches package.json
+        run: |
+          want="v$(jq -r .version package.json)"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME does not match package.json ($want)"; exit 1; }
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -80,3 +85,5 @@ jobs:
         with:
           files: release/*
           generate_release_notes: true
+          # A tag with a suffix (v0.2.0-beta.1) is a prerelease, never "Latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
