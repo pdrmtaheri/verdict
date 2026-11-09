@@ -7,6 +7,7 @@ import { parseLaws } from "../src/laws.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";
 import { overrides } from "../src/models.ts";
 import { overrides as agents } from "../src/agent.ts";
+import { stampModels } from "../src/specbind.ts";
 import { inside } from "../src/tools.ts";
 import { at } from "../src/where.ts";
 import { repo, scriptedAgent } from "./helpers.ts";
@@ -171,13 +172,16 @@ const tlcAvailable = !!Bun.which("tlc") || !!process.env.VERDICT_TLA2TOOLS || (a
 test.skipIf(!tlcAvailable)("a TLA+ enforcer passes when its invariant holds and fails when it's violated", async () => {
   const saved = process.env.VERDICT_TLA2TOOLS;
   if (!Bun.which("tlc") && !saved) process.env.VERDICT_TLA2TOOLS = toolboxJar;
-  const spec = (inv: string) => `---- MODULE Counter ----\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
+  // A spec must name the code it models, stamped with its hash, or it is stale.
+  const spec = (inv: string) => `---- MODULE Counter ----\n\\* models: counter.js\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 4\nSpec == Init /\\ [][Next]_x\nInv == ${inv}\n====\n`;
   try {
-    const ok = repo({ ".verdict/Counter.tla": spec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const ok = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": spec("x <= 3"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    stampModels(ok, ".verdict/Counter.tla");
     const okR = await checkLaw(at(ok), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] });
     expect(okR.details[0]!.result.message).not.toContain("Cannot find source file");
     expect(okR.status).toBe("pass");
-    const bad = repo({ ".verdict/Counter.tla": spec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    const bad = repo({ "counter.js": "let x = 0;\n", ".verdict/Counter.tla": spec("x <= 2"), ".verdict/Counter.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
+    stampModels(bad, ".verdict/Counter.tla");
     expect((await checkLaw(at(bad), { law, enforcers: [{ kind: "tla", path: ".verdict/Counter.tla" }] })).status).toBe("fail");
   } finally {
     if (saved === undefined) delete process.env.VERDICT_TLA2TOOLS;

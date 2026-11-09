@@ -37,7 +37,12 @@ test("a corrupt or malformed lock is a message that says what to do", async () =
   const { join } = await import("node:path");
   const { readLock, BadLock } = await import("../src/lock.ts");
   const dir = mkdtempSync(join(process.env.TMPDIR!, "verdict-lock-"));
-  for (const [body, said] of [["{{ not: [yaml\n", "not valid YAML"], ["- a\n- b\n", "isn't a verdict lock"], ["abc:\n  nolaw: 1\n", "isn't a verdict lock"]]) {
+  const cases: [body: string, said: string][] = [
+    ["{{ not: [yaml\n", "not valid YAML"],
+    ["- a\n- b\n", "isn't a verdict lock"],
+    ["abc:\n  nolaw: 1\n", "isn't a verdict lock"],
+  ];
+  for (const [body, said] of cases) {
     writeFileSync(join(dir, "VERDICT.lock"), body);
     expect(() => readLock(join(dir, "VERDICT.lock"))).toThrow(BadLock);
     expect(() => readLock(join(dir, "VERDICT.lock"))).toThrow(said);
