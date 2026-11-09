@@ -133,6 +133,8 @@ Enforcer kinds (the "kind" in submit) and their file formats
   Proof standards for tests that drive the app (E2E, CLI, or API):
   - Exercise the real user path. Don't use internal setters or test-only
     endpoints.
+  - Find elements by stable handles: ARIA roles and labels, data attributes,
+    prompt strings, or route paths. Never use coordinates or tab order.
   - Check the action and the resulting state. Check side effects too (files
     written, rows inserted, messages sent), not only what is shown.
   - Mock only where a production boundary already isolates the external
