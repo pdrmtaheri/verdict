@@ -32,7 +32,7 @@ async function runPlan(root: string, calls: { tool: string; input: unknown }[]) 
   const model = scriptedAgent(calls);
   agents.agent = model;
   const log: string[] = [];
-  const ok = await plan(at(root), join(root, "VERDICT.lock"), [law!], new Map(), (l) => log.push(l));
+  const ok = await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: new Map() }, (l) => log.push(l));
   return { ok, log: log.join("\n"), model };
 }
 
@@ -122,14 +122,14 @@ test("plan re-plans a drifted law with the triage rules, and leaves in-sync laws
   const model = scriptedAgent([write, submit({ breaks: [goodBreak] })]);
   agents.agent = model;
   const log: string[] = [];
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l))).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: lock }, (l) => log.push(l))).toBe(true);
   expect(log.join("\n")).toContain("drift: Amounts are stored in cents.");
   expect(model.prompts[0]).toContain("Never weaken an enforcer to make it pass");
   // Synced now: a second run re-proves it without calling the model.
   const again = scriptedAgent([]);
   agents.agent = again;
   const log2: string[] = [];
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], readLock(join(root, "VERDICT.lock")), (l) => log2.push(l))).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: readLock(join(root, "VERDICT.lock")) }, (l) => log2.push(l))).toBe(true);
   expect(log2.join("\n")).toContain("in sync: Amounts are stored in cents.");
   expect(again.prompts.length).toBe(0);
 });
@@ -140,7 +140,7 @@ test("plan reports a law that already failed when planned, without re-planning i
   const model = scriptedAgent([]);
   agents.agent = model;
   const log: string[] = [];
-  await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l));
+  await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: lock }, (l) => log.push(l));
   expect(log.join("\n")).toContain("fails today: Amounts are stored in cents.");
   expect(model.prompts.length).toBe(0);
 });
@@ -159,7 +159,7 @@ test("plan re-plans a law that passed when planned and fails now", async () => {
   const model = scriptedAgent([submit({ finding: "src/money.ts:1 is a float again" })]);
   agents.agent = model;
   const log: string[] = [];
-  await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l));
+  await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: lock }, (l) => log.push(l));
   expect(log.join("\n")).toContain("newly failing: Amounts are stored in cents.");
   expect(model.prompts[0]).toContain("passed when it was planned");
   expect(model.prompts[0]).toContain("something incidental");
@@ -185,7 +185,7 @@ test("plan --again re-plans an in-sync law on request", async () => {
   const model = scriptedAgent([write, submit({ breaks: [goodBreak] })]);
   agents.agent = model;
   const log: string[] = [];
-  expect(await plan(at(root), join(root, "VERDICT.lock"), [law!], lock, (l) => log.push(l), { again: () => true })).toBe(true);
+  expect(await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: [law!], lock: lock }, (l) => log.push(l), { again: () => true })).toBe(true);
   expect(log.join("\n")).toContain("planned again: Amounts are stored in cents.");
   expect(model.prompts[0]).toContain("asked for this law to be planned again");
   expect(model.prompts[0]).toContain(".verdict/cents.sh");

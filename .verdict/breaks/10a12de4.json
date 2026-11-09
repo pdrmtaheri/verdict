@@ -5,8 +5,8 @@
     "edits": [
       {
         "path": "src/cli.ts",
-        "find": "  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));",
-        "replace": "  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));\n  const { writeLock } = await import(\"./lock.ts\");\n  for (const set of sets) writeLock(set.lockFile, set.lock, set.laws);"
+        "find": "  const reports = await Promise.all(sets.map((set) => check(set, limit)));",
+        "replace": "  const reports = await Promise.all(sets.map((set) => check(set, limit)));\n  const { writeLock } = await import(\"./lock.ts\");\n  for (const set of sets) writeLock(set.lockFile, set.lock, set.laws);"
       }
     ]
   }

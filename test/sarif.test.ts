@@ -13,7 +13,7 @@ const fixture = () => repo({ "VERDICT.md": "- Money is never a float.\n- Another
 
 test("SARIF has one rule per law and a result per failure", async () => {
   const root = fixture();
-  const reports = await check(at(root), laws, lock);
+  const reports = await check({ ...at(root), laws: laws, lock: lock });
   const out = sarif(root, [{ where: at(root), lawsFile: join(root, "VERDICT.md"), reports }]) as any;
   expect(out.version).toBe("2.1.0");
   const run = out.runs[0];

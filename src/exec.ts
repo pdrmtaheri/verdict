@@ -1,17 +1,7 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-
 export interface ExecResult {
   code: number;
   output: string; // stdout + stderr
   stdout: string;
-}
-
-// Finds a tool in the repo's node_modules/.bin first, then on PATH.
-export function which(root: string, bin: string): string | null {
-  const local = join(root, "node_modules", ".bin", bin);
-  if (existsSync(local)) return local;
-  return Bun.which(bin);
 }
 
 export async function exec(

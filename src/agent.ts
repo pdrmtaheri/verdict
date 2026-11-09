@@ -4,21 +4,19 @@
 // `submit` call. The agents' own built-in tools are switched off, so the same
 // confinement applies whichever agent runs.
 import { z } from "zod";
+import { errorMessage } from "./fsx.ts";
 
-export interface Tool {
+export interface Tool<S extends z.ZodObject = z.ZodObject> {
   description: string;
-  schema: z.ZodObject;
-  execute: (input: never) => Promise<string>;
+  schema: S;
+  // A method, so a Tool of any schema is a Tool: callTool parses its input
+  // against `schema` before calling it.
+  execute(input: z.infer<S>): Promise<string>;
 }
 export type Tools = Record<string, Tool>;
 
-export function defineTool<S extends z.ZodObject>(t: {
-  description: string;
-  schema: S;
-  execute: (input: z.infer<S>) => Promise<string>;
-}): Tool {
-  return t as unknown as Tool;
-}
+// Infers the input type of `execute` from the schema.
+export const defineTool = <S extends z.ZodObject>(t: Tool<S>): Tool<S> => t;
 
 // Validates the agent's input against the schema, then runs the tool. Errors
 // come back as text for the agent to read, never as exceptions.
@@ -26,9 +24,9 @@ export async function callTool(tool: Tool, input: unknown): Promise<{ text: stri
   const parsed = tool.schema.safeParse(input);
   if (!parsed.success) return { text: `invalid input: ${z.prettifyError(parsed.error)}`, isError: true };
   try {
-    return { text: await tool.execute(parsed.data as never), isError: false };
+    return { text: await tool.execute(parsed.data), isError: false };
   } catch (err) {
-    return { text: err instanceof Error ? err.message : String(err), isError: true };
+    return { text: errorMessage(err), isError: true };
   }
 }
 

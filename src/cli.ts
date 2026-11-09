@@ -7,7 +7,8 @@ import { describe, discoverPlaygrounds, startPlayground } from "./playground/ser
 import { init } from "./init.ts";
 import { sarif } from "./sarif.ts";
 import { BadLock } from "./lock.ts";
-import { BadLaws, findSets, isDir, repoRoot, shown } from "./sets.ts";
+import { errorMessage, isDir } from "./fsx.ts";
+import { BadLaws, findSets, repoRoot, shown } from "./sets.ts";
 import type { Law } from "./laws.ts";
 import { jobs, makeLimit } from "./limit.ts";
 import { Claims, plan } from "./plan.ts";
@@ -111,12 +112,12 @@ async function main(argv: string[]): Promise<number> {
     const results = await Promise.all(
       sets.map((set) => {
         const prefix = many ? `[${shown(repo, set.lawsFile)}] ` : "";
-        return plan(set, set.lockFile, set.laws, set.lock, (line) => console.log(prefix + line.replaceAll("\n", `\n${prefix}`)), { limit, claims, again: replan });
+        return plan(set, (line) => console.log(prefix + line.replaceAll("\n", `\n${prefix}`)), { limit, claims, again: replan });
       }),
     );
     return results.every(Boolean) ? 0 : 1;
   }
-  const reports = await Promise.all(sets.map((set) => check(set, set.laws, set.lock, limit)));
+  const reports = await Promise.all(sets.map((set) => check(set, limit)));
   if (fmt === "sarif") {
     console.log(JSON.stringify(sarif(repo, sets.map((set, i) => ({ where: set, lawsFile: set.lawsFile, reports: reports[i]! }))), null, 2));
     return exitCode(reports.flat());
@@ -142,7 +143,7 @@ async function run(): Promise<number> {
     return await main(process.argv.slice(2));
   } catch (err) {
     if (process.env.VERDICT_DEBUG) throw err;
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     if (err instanceof BadLock || err instanceof BadLaws) {
       console.error(message);
       return 2;

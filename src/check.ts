@@ -1,12 +1,11 @@
-import { breakFor, describe, prove, readBreaks, stale } from "./breaks.ts";
-import { runEnforcer, scopeOf } from "./enforcers.ts";
-import { changes, inputsOf } from "./pins.ts";
-import type { Law } from "./laws.ts";
-import { enforcerId, type Enforcer, type Lock, type LockEntry } from "./lock.ts";
-import type { Where } from "./where.ts";
+import { breakFor, describe, prove, readBreaks, stale, type Break } from "./breaks.ts";
+import { runEnforcer, scopeOf, type RunSite } from "./enforcers.ts";
 import { jobs, makeLimit, type Limit } from "./limit.ts";
+import { enforcerId, type Enforcer, type LockEntry } from "./lock.ts";
+import { changes, inputsOf } from "./pins.ts";
 import { combine, fail, inconclusive, type Result, type Status } from "./result.ts";
-import type { Break } from "./breaks.ts";
+import type { Laws } from "./sets.ts";
+import type { Where } from "./where.ts";
 
 export interface LawReport {
   law: string;
@@ -17,11 +16,7 @@ export interface LawReport {
   details: { id: string; kind: string; path: string; result: Result; scope: string | null; warnings: string[] }[];
 }
 
-export interface CheckOptions {
-  sandbox?: { readable: string[]; writable?: string[] };
-  // Check this folder of code instead of the law's directory (see Context.target).
-  target?: string;
-  exclude?: string[]; // paths inside the target that are not part of the code under check
+export interface CheckOptions extends Pick<RunSite, "sandbox" | "target" | "exclude"> {
   // Replay the break of an enforcer that passes but whose inputs changed
   // since it was proven (default). `plan` replays every break itself.
   replay?: boolean;
@@ -34,8 +29,8 @@ export async function checkLaw(w: Where, entry: LockEntry, opts: CheckOptions = 
   const details: LawReport["details"] = [];
   const breaks = opts.hash ? readBreaks(w.dir, opts.hash) : [];
   const run = async (e: Enforcer) => {
-    let result = await runEnforcer(e.kind, { root: w.dir, repo: w.repo, law: entry.law, path: e.path, name: e.name, rule: e.rule, scope: e.scope, sandbox: opts.sandbox, target: opts.target, exclude: opts.exclude });
-    const warnings: string[] = [...(result.warnings ?? [])];
+    let result = await runEnforcer(e, { where: w, law: entry.law, sandbox: opts.sandbox, target: opts.target, exclude: opts.exclude });
+    const warnings = [...(result.warnings ?? [])];
     if (opts.replay !== false && result.status === "pass") result = await guard(w, entry.law, e, breakFor(breaks, e, entry.enforcers), result, warnings);
     details.push({ id: enforcerId(e), kind: e.kind, path: e.path, result, scope: e.scope ?? scopeOf(w.dir, e.path), warnings });
     return result;
@@ -88,13 +83,13 @@ async function guard(w: Where, law: string, e: Enforcer, brk: Break | undefined,
 }
 
 // Laws run in parallel, up to the limit (VERDICT_JOBS); results keep VERDICT.md's order.
-export async function check(w: Where, laws: Law[], lock: Lock, limit: Limit = makeLimit(jobs())): Promise<LawReport[]> {
+export async function check(set: Laws, limit: Limit = makeLimit(jobs())): Promise<LawReport[]> {
   return Promise.all(
-    laws.map((law) => {
-      const entry = lock.get(law.hash);
+    set.laws.map(async (law): Promise<LawReport> => {
+      const entry = set.lock.get(law.hash);
       // An entry with no enforcers checks nothing, so the law isn't planned.
-      if (!entry || entry.enforcers.length === 0) return { law: law.text, hash: law.hash, status: "unplanned" as const, details: [] };
-      return limit(async () => ({ ...(await checkLaw(w, entry, { hash: law.hash })), hash: law.hash }));
+      if (!entry || entry.enforcers.length === 0) return { law: law.text, hash: law.hash, status: "unplanned", details: [] };
+      return limit(async () => ({ ...(await checkLaw(set, entry, { hash: law.hash })), hash: law.hash }));
     }),
   );
 }

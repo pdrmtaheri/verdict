@@ -46,7 +46,7 @@ overrides.agent = {
 const { repo, sets } = await findSets(process.cwd(), []);
 const limit = makeLimit(jobs());
 const claims = new Claims(sets);
-const running = Promise.all(sets.map((set: any) => plan(set, set.lockFile, set.laws, set.lock, () => {}, { limit, claims })));
+const running = Promise.all(sets.map((set: any) => plan(set, () => {}, { limit, claims })));
 // plan() has already pruned the lock by now: its first steps run before its first await.
 if (process.env.STARTED_MARKER) writeFileSync(process.env.STARTED_MARKER, "started");
 const oks: boolean[] = await running;
@@ -56,7 +56,7 @@ const planned: boolean[] = [];
 const synced: boolean[] = [];
 let code = 0;
 for (const set of fresh) {
-  const reports = await check(set, set.laws, set.lock, limit);
+  const reports = await check(set, limit);
   code = Math.max(code, exitCode(reports));
   for (const law of set.laws) {
     planned.push(set.lock.has(law.hash));

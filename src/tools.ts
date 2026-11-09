@@ -1,54 +1,16 @@
 // Tools that agents (the LLM judge and the planner) use to look at the repo.
 // Every path is confined to the repo root.
-import { lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { defineTool } from "./agent.ts";
 import { exec, tail } from "./exec.ts";
-import { sandboxed, sandboxFailure } from "./sandbox.ts";
+import { inside, lexists, listFiles } from "./fsx.ts";
+import { execBoxed } from "./sandbox.ts";
 import { withScratch } from "./scratch.ts";
 
+
 const MAX_READ = 100_000;
-
-// Resolves symlinks on the deepest ancestor that exists (as a file, directory
-// or link), so links can't escape. A dangling link can't be resolved, and
-// writing through one would create its target wherever it points, so it's refused.
-function real(p: string): string {
-  let existing = p;
-  while (!lexists(existing)) existing = dirname(existing);
-  let resolved: string;
-  try {
-    resolved = realpathSync(existing);
-  } catch {
-    throw new Error(`${existing} is a symlink to nowhere`);
-  }
-  return resolve(resolved, relative(existing, p));
-}
-
-function lexists(p: string): boolean {
-  try {
-    lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function inside(root: string, p: string, within = root): string {
-  const abs = resolve(root, p);
-  const target = real(abs);
-  const base = real(resolve(within));
-  if (target !== base && !target.startsWith(base + sep)) {
-    throw new Error(`${p} is outside ${relative(root, within) || "the repo"}`);
-  }
-  return abs;
-}
-
-async function gitFiles(root: string): Promise<string[]> {
-  const r = await exec(["git", "ls-files", "--cached", "--others", "--exclude-standard"], { cwd: root });
-  if (r.code === 0) return r.output.split("\n").filter(Boolean);
-  return Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: root, onlyFiles: true }));
-}
 
 // Read-only git, with an allowlist of flags per subcommand: git has many flags
 // that read or write files (--output, --no-index, -S<file>, --contents,
@@ -95,7 +57,7 @@ export function checkGitArgs(root: string, args: string[], repo = root): void {
 // repo), with paths relative to root.
 async function filesFrom(root: string, repo: string, from = "."): Promise<string[]> {
   const base = inside(root, from, repo);
-  return (await gitFiles(base)).map((f) => relative(root, join(base, f)) || f);
+  return (await listFiles(base)).map((f) => relative(root, join(base, f)) || f);
 }
 
 export function readTools(root: string, repo = root) {
@@ -105,7 +67,7 @@ export function readTools(root: string, repo = root) {
       schema: z.object({ path: z.string().describe("Path relative to the law's directory; ../ reaches the rest of the repo") }),
       execute: async ({ path }) => {
         const text = readFileSync(inside(root, path, repo), "utf8");
-        return text.length > MAX_READ ? text.slice(0, MAX_READ) + "\n…(truncated)" : text;
+        return text.length > MAX_READ ? `${text.slice(0, MAX_READ)  }\n…(truncated)` : text;
       },
     }),
     list_files: defineTool({
@@ -213,14 +175,11 @@ export function writeTools(root: string, outDir: string, repo = root, claim: (ab
         if (script) inside(root, bin, outDir); // throws outside the law's .verdict/
         else if (!RUNNABLE.has(bin)) throw new Error(`${bin} is not allowed`);
         else if (!Bun.which(bin)) return `${bin} is not installed`;
-        const r = await withScratch(repo, async (copy) => {
+        const r = await withScratch(repo, (copy) => {
           const dir = join(copy, relative(repo, root));
           const jar = process.env.VERDICT_TLA2TOOLS; // TLC, when the planner runs it through java
-          const box = sandboxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy], network: false }, dir);
-          return exec(box.argv, { cwd: dir, env: box.env, cleanEnv: true, timeoutMs: 5 * 60_000 });
+          return execBoxed(argv, { readable: [copy, repo, ...(jar ? [jar] : [])], writable: [copy], network: false }, dir, { timeoutMs: 5 * 60_000 });
         });
-        const broken = r.code !== 0 ? sandboxFailure(r.output) : null;
-        if (broken) throw new Error(`couldn't start verdict's sandbox (${broken}): if verdict already runs in a sandbox, set VERDICT_SANDBOX=off`);
         return tail(`exit ${r.code}\n${r.output}`, 200);
       },
     }),

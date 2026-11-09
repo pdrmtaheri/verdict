@@ -9,9 +9,11 @@
 // macOS: sandbox-exec. Linux: bubblewrap (bwrap). Elsewhere, or if neither is
 // available, verdict refuses to run the code. VERDICT_SANDBOX=off turns the
 // sandbox off; use it only when something else already confines verdict.
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, sep } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
+import { exec, type ExecResult } from "./exec.ts";
+import { realOrSelf as real, under } from "./fsx.ts";
 
 export interface Box {
   readable: string[]; // extra paths readable inside the user's home
@@ -48,8 +50,6 @@ export function installRoots(home = real(homedir())): string[] {
 
 export class SandboxUnavailable extends Error {}
 
-const real = (p: string) => (existsSync(p) ? realpathSync(p) : p);
-const under = (p: string, dir: string) => p === dir || p.startsWith(dir + sep);
 
 // Where the user's tools live inside their home (~/.bun, a node version
 // manager's install, …): each PATH entry under home, plus its parent when the
@@ -174,4 +174,15 @@ export function sandboxed(argv: string[], box: Box, cwd: string): { argv: string
 export function sandboxFailure(output: string): string | null {
   const m = /sandbox-exec: [^\n]*|bwrap: [^\n]*/.exec(output);
   return m ? m[0] : null;
+}
+
+// Runs argv inside the box, with exactly the box's environment. Throws
+// SandboxUnavailable when the sandbox itself couldn't start, so a broken
+// sandbox never reads as the program failing.
+export async function execBoxed(argv: string[], box: Box, cwd: string, opts: { timeoutMs?: number } = {}): Promise<ExecResult> {
+  const boxed = sandboxed(argv, box, cwd);
+  const r = await exec(boxed.argv, { cwd, env: boxed.env, cleanEnv: true, timeoutMs: opts.timeoutMs });
+  const broken = r.code === 0 ? null : sandboxFailure(r.output);
+  if (broken) throw new SandboxUnavailable(`couldn't start verdict's sandbox (${broken}). If verdict itself already runs in a sandbox, set VERDICT_SANDBOX=off`);
+  return r;
 }

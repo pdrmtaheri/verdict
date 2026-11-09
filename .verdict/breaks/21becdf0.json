@@ -16,8 +16,8 @@
     "edits": [
       {
         "path": "src/lock.ts",
-        "find": "  for (const { hash } of laws) {\n    const entry = lock.get(hash);\n    if (!entry) continue;\n    doc[hash] = {\n      law: entry.law,\n      enforcers: entry.enforcers.map((e) => ({ [e.kind]: e.path })),\n    };\n  }",
-        "replace": "  for (const [hash, entry] of lock) {\n    doc[hash] = {\n      law: entry.law,\n      enforcers: entry.enforcers.map((e) => ({ [e.kind]: e.path })),\n    };\n  }"
+        "find": "  for (const { hash } of laws) {\n    const entry = lock.get(hash);\n    if (!entry) continue;\n    doc[hash] = {",
+        "replace": "  for (const [hash, entry] of lock) {\n    doc[hash] = {"
       }
     ]
   }

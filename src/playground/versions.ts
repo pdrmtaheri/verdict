@@ -5,7 +5,7 @@
 // target), and looks there. Laws, enforcers, breaks and the lock are shared.
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { inside } from "../tools.ts";
+import { inside } from "../fsx.ts";
 import type { Manifest } from "./manifest.ts";
 
 export const MAIN = "main";

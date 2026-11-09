@@ -2,10 +2,12 @@
 // down in prose for people and agents (AGENTS.md, CLAUDE.md, CONTRIBUTING.md,
 // .cursor/rules…). It's a draft for a person to edit: verdict doesn't treat
 // those files as laws, because they change freely and mix rules with advice.
-import { existsSync, lstatSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { z } from "zod";
 import { runAgent } from "./agent.ts";
+import { lexists } from "./fsx.ts";
+import SYSTEM from "./prompts/init.md" with { type: "text" };
 import { readTools } from "./tools.ts";
 import type { Where } from "./where.ts";
 
@@ -14,15 +16,6 @@ const FILES = [
   ".github/copilot-instructions.md", ".github/CONTRIBUTING.md", ".cursorrules", ".windsurfrules", ".clinerules",
 ];
 const DIRS = [".cursor/rules", ".claude/rules", ".github/instructions"];
-
-function lexists(p: string): boolean {
-  try {
-    lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // The prose rule files in a directory, relative to it.
 export function ruleFiles(dir: string): string[] {
@@ -35,20 +28,6 @@ export function ruleFiles(dir: string): string[] {
   }
   return found;
 }
-
-const SYSTEM = `You draft laws for verdict from the rules a project already wrote down.
-A law is one assertion about the software that is either true or false of
-the code: "Money is never a float; amounts are integer cents." It is checked
-by tools, so it must be specific enough to check.
-
-Read the files you are given (and the code, to understand them). Keep only
-the rules that are about the software itself and could be checked: what the
-code must or must never do, how it is structured, what users see. Leave out
-advice about workflow, tone, process or how to talk to an agent ("run tests
-before committing", "be concise"), and anything vague you can't make
-checkable without guessing. Merge duplicates. Write each law in the
-project's own words where you can, one sentence, at most two. Cite the file
-each one came from. Call submit once.`;
 
 const Draft = z.object({
   laws: z.array(z.object({ text: z.string(), from: z.string().describe("The file it came from") })),
@@ -90,7 +69,7 @@ export async function init(w: Where, log: (line: string) => void): Promise<numbe
     "     then run `verdict plan`. Each top-level bullet is one law. -->",
     "",
     // The source goes on the line before: an indented line would join the law's text.
-    ...draft.laws.map((l) => `<!-- from ${l.from} -->\n- ${l.text.replace(/\s+/g, " ").trim()}\n`),
+    ...draft.laws.map((l) => `<!-- from ${l.from} -->\n- ${l.text.replaceAll(/\s+/g, " ").trim()}\n`),
     "",
   ].join("\n");
   // "wx": create only. If anything appeared at the path meanwhile (a file or

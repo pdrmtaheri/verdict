@@ -88,7 +88,7 @@ test("a nested law is planned into its own directory, reading up to the repo roo
   ]);
   agents.agent = agent;
   const log: string[] = [];
-  expect(await plan({ dir: b, repo: root }, join(b, "VERDICT.lock"), laws, new Map(), (l) => log.push(l))).toBe(true);
+  expect(await plan({ dir: b, repo: root, lockFile: join(b, "VERDICT.lock"), laws, lock: new Map() }, (l) => log.push(l))).toBe(true);
   expect(agent.prompts[0]).toContain("packages/b/VERDICT.md and applies to that directory's subtree");
   expect(agent.results[0]).toBe("shared\n");
   expect(agent.results[1]).toContain("outside");

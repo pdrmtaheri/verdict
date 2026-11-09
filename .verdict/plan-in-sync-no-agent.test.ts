@@ -112,7 +112,7 @@ test("in-process: plan() with every law in sync never calls runAgent", async () 
     const text = ONE[0]!.text;
     const log: string[] = [];
     const lock = readLock(join(root, "VERDICT.lock"));
-    const ok = await plan(at(root), join(root, "VERDICT.lock"), parseLaws(`- ${text}`), lock, (l) => log.push(l));
+    const ok = await plan({ ...at(root), lockFile: join(root, "VERDICT.lock"), laws: parseLaws(`- ${text}`), lock }, (l) => log.push(l));
     expect(log.join("\n")).toContain("in sync:");
     expect(agent.started).toBe(0);
     expect(ok).toBe(true);

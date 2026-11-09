@@ -16,8 +16,8 @@
     "edits": [
       {
         "path": "src/check.ts",
-        "find": "import type { Law } from \"./laws.ts\";",
-        "replace": "import type { Law } from \"./laws.ts\";\nimport { codex } from \"./agents/codex.ts\";"
+        "find": "import type { Laws } from \"./sets.ts\";",
+        "replace": "import type { Laws } from \"./sets.ts\";\nimport { codex } from \"./agents/codex.ts\";"
       }
     ]
   },

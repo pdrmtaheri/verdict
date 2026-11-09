@@ -6,12 +6,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { callTool } from "../agent.ts";
-import { inside, readTools } from "../tools.ts";
-// @ts-ignore: with type "file", each import is the file's path (embedded when compiled)
+import { errorMessage, inside } from "../fsx.ts";
+import { readTools } from "../tools.ts";
+// With { type: "file" } each import is the file's path (embedded when
+// compiled); TypeScript types the .html and .js ones as modules.
 import indexHtml from "./ui/index.html" with { type: "file" };
-// @ts-ignore
 import appJs from "./ui/app.js" with { type: "file" };
-// @ts-ignore
 import styleCss from "./ui/style.css" with { type: "file" };
 import { Events } from "./events.ts";
 import { handleMcp } from "./mcp.ts";
@@ -21,7 +21,7 @@ import { lawViews, tally } from "./view.ts";
 import { MAIN, codePath, hasVersion, versionList } from "./versions.ts";
 
 // Imported as files so `bun build --compile` embeds them in the executable.
-const ASSETS: Record<string, string> = { "/": indexHtml as unknown as string, "/app.js": appJs as unknown as string, "/style.css": styleCss as unknown as string };
+const ASSETS: Record<string, string> = { "/": indexHtml as unknown as string, "/app.js": appJs as unknown as string, "/style.css": styleCss };
 const TYPES: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8" };
 
 export interface Playground {
@@ -125,7 +125,7 @@ export async function startPlayground(target: string, opts: { port?: number; tok
         },
       });
     } catch (err) {
-      return new Response(err instanceof Error ? err.message : String(err), { status: 400 });
+      return new Response(errorMessage(err), { status: 400 });
     }
   };
 
@@ -254,7 +254,9 @@ export async function startPlayground(target: string, opts: { port?: number; tok
     ids: [...instances.keys()],
     token,
     events: first.events,
-    stop: async () => void (await server.stop(true)),
+    stop: async () => {
+      await server.stop(true);
+    },
   };
 }
 

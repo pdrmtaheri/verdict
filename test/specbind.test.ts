@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync,existsSync } from "node:fs";
 import { join } from "node:path";
 import { runEnforcer } from "../src/enforcers.ts";
 import { parseLaws } from "../src/laws.ts";
@@ -43,7 +43,7 @@ test("a spec with no models line, or whose file is gone, is not trusted", () => 
 test("the tla enforcer fails as stale when the code it models changed, before TLC even runs", async () => {
   const root = repo(files());
   stampModels(root, ".verdict/m.tla");
-  const run = () => runEnforcer("tla", { root, law: "L", path: ".verdict/m.tla" });
+  const run = () => runEnforcer({ kind: "tla", path: ".verdict/m.tla" }, { where: at(root), law: "L" });
   const before = await run();
   expect(before.status === "fail" && isStale(before.message)).toBe(false); // matches: goes on to TLC (inconclusive without it)
   writeFileSync(join(root, "src/code.js"), "const x = 3;\n");
@@ -83,7 +83,6 @@ test("planning rejects a spec with no models line, or with no test beside it", a
   expect(gone.problem).toContain("not a file of the system under check");
 });
 
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { certEnv } from "../src/sandbox.ts";
 
@@ -100,7 +99,7 @@ test.skipIf(!existsSync(TLA_JAR) || !Bun.which("java"))("TLC runs a spec that EX
     const spec = "---- MODULE m ----\n\\* scope: a counter\n\\* models: src/code.js\nEXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % 3\nSpec == Init /\\ [][Next]_x\nInv == x \\in 0..2\n====\n";
     const root = repo({ "src/code.js": "1\n", ".verdict/m.tla": spec, ".verdict/m.cfg": "SPECIFICATION Spec\nINVARIANT Inv\n" });
     stampModels(root, ".verdict/m.tla");
-    const r = await runEnforcer("tla", { root, law: "L", path: ".verdict/m.tla", sandbox: { readable: [root] } });
+    const r = await runEnforcer({ kind: "tla", path: ".verdict/m.tla" }, { where: at(root), law: "L", sandbox: { readable: [root] } });
     expect(r.status).toBe("pass");
   } finally {
     delete process.env.VERDICT_TLA2TOOLS;
