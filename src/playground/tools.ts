@@ -94,7 +94,7 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
 
   return {
     get_brief: defineTool({
-      description: "Start here. The playground's idea, the brief you are working to, the current laws, and the latest check report.",
+      description: "Start here. Returns the playground's idea, the brief you work to, the current laws, and the latest check report.",
       schema: z.object({}),
       execute: async () => {
         const m = manifest();
@@ -120,7 +120,7 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
       },
     }),
     plan: defineTool({
-      description: "Plan how each new or reworded law is enforced, and re-prove existing ones. Uses the playground's configured coding agent (VERDICT_AGENT), so it can take minutes.",
+      description: "Plan how each new or reworded law is enforced, and re-prove the existing laws. Uses the playground's configured coding agent (VERDICT_AGENT), so it can take minutes.",
       schema: z.object({}),
       execute: async () => {
         const lines: string[] = [];
@@ -133,8 +133,8 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
       },
     }),
     check: defineTool({
-      description: "Run every law's enforcers on one version's code (default: main). Each law is pass, fail, inconclusive or not planned.",
-      schema: z.object({ version: z.string().optional().describe("A version id from get_brief; default main") }),
+      description: "Run every law's enforcers on one version's code. The default version is main. Each law is pass, fail, inconclusive, or not planned.",
+      schema: z.object({ version: z.string().optional().describe("A version id from get_brief. Default main") }),
       execute: runCheck,
     }),
     list_files: read.list_files,
@@ -143,7 +143,7 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
     write_file: defineTool({
       description: "Create or overwrite a file under one of the playground's writable directories (see get_brief), or under versions/<id>/<directory>/ to write another version's code.",
       schema: z.object({
-        path: z.string().describe("Relative to the playground root, e.g. src/limiter.ts or versions/no-all-red/public/controller.js"),
+        path: z.string().describe("Relative to the playground root, such as src/limiter.ts or versions/no-all-red/public/controller.js"),
         content: z.string(),
         executable: z.boolean().optional(),
       }),
@@ -156,8 +156,8 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
       },
     }),
     run_tests: defineTool({
-      description: "Run one test file the way verdict would (bun/vitest/jest/go/pytest, inferred from the file name), in a read-only sandbox: it can't change the playground, read your home directory, or reach the network. For an enforcer in .verdict/, version says whose code it looks at (VERDICT_TARGET).",
-      schema: z.object({ path: z.string().describe("Test file, relative to the playground root"), version: z.string().optional().describe("The version whose code an enforcer should look at; default main") }),
+      description: "Run one test file the way verdict would. verdict infers the runner (bun, vitest, jest, go, or pytest) from the file name. The test runs in a read-only sandbox, so it can't change the playground, read your home directory, or reach the network. For an enforcer in .verdict/, version picks the code it looks at (VERDICT_TARGET).",
+      schema: z.object({ path: z.string().describe("Test file, relative to the playground root"), version: z.string().optional().describe("The version whose code an enforcer looks at. Default main") }),
       execute: async ({ path, version }) => {
         inside(root, path);
         if (!existsSync(join(root, path))) throw new Error(`${path} does not exist: write it first`);

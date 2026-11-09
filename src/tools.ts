@@ -72,10 +72,10 @@ export function readTools(root: string, repo = root) {
     }),
     list_files: defineTool({
       description:
-        "List files tracked in git (respects .gitignore) under the law's directory, or under `from` " +
-        "(e.g. \"..\" for the parent; never above the repo root). Paths are relative to the law's directory. Optional glob filter.",
+        "List the files that git tracks under the law's directory, or under `from`, such as \"..\" for the parent. " +
+        "`from` never reaches above the repo root. Paths are relative to the law's directory. Takes an optional glob filter.",
       schema: z.object({
-        glob: z.string().optional().describe('e.g. "src/**/*.ts", matched against the listed paths'),
+        glob: z.string().optional().describe('Matched against the listed paths, such as "src/**/*.ts"'),
         from: z.string().optional().describe('Directory to list, relative to the law\'s directory. Default "."'),
       }),
       execute: async ({ glob, from }) => {
@@ -90,7 +90,7 @@ export function readTools(root: string, repo = root) {
     grep: defineTool({
       description:
         "Search file contents with a regular expression, under the law's directory or under `from`. " +
-        "Returns path:line: text, paths relative to the law's directory.",
+        "Returns one path:line: text entry per match, with paths relative to the law's directory.",
       schema: z.object({
         pattern: z.string(),
         glob: z.string().optional().describe("Only search files matching this glob"),
@@ -120,7 +120,7 @@ export function readTools(root: string, repo = root) {
     }),
     git: defineTool({
       description: `Run a read-only git command: ${Object.keys(GIT_FLAGS).join(", ")}, with common flags.`,
-      schema: z.object({ args: z.array(z.string()).describe('e.g. ["diff", "--cached"]') }),
+      schema: z.object({ args: z.array(z.string()).describe('Such as ["diff", "--cached"]') }),
       execute: async ({ args }) => {
         checkGitArgs(root, args, repo);
         const [sub, ...rest] = args;
@@ -164,9 +164,9 @@ export function writeTools(root: string, outDir: string, repo = root, claim: (ab
     }),
     run: defineTool({
       description:
-        `Run a program to validate an enforcer (e.g. semgrep --test, a test runner, tlc). ` +
+        `Run a program to validate an enforcer, such as semgrep --test, a test runner, or tlc. ` +
         `Allowed: ${[...RUNNABLE].join(", ")}, or a script you wrote in ${relative(root, outDir)}/. ` +
-        `No shell. Runs in a sandboxed scratch copy of the repo: it can't change the repo, ` +
+        `No shell. The program runs in a sandboxed scratch copy of the repo, so it can't change the repo, ` +
         `read your home directory, or reach the network.`,
       schema: z.object({ argv: z.array(z.string()).min(1) }),
       execute: async ({ argv }) => {
