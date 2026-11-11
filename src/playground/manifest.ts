@@ -5,6 +5,7 @@ import { isAbsolute, join, normalize } from "node:path";
 import { z } from "zod";
 import { errorMessage } from "../fsx.ts";
 import { parseLaws } from "../laws.ts";
+import { hasVersion } from "./versions.ts";
 
 export const PANELS = ["brief", "preview", "laws", "checks", "files", "activity"] as const;
 
@@ -19,10 +20,37 @@ export const Manifest = z.object({
   // (code in versions/<id>/). Optional: a folder in versions/ is enough.
   main: z.object({ label: z.string(), note: z.string().optional() }).optional(),
   versions: z.array(z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "use lowercase letters, digits and dashes"), label: z.string().optional(), note: z.string().optional() })).optional(),
+  // An introduction the page plays on first open, as a script: each chapter
+  // shows a law, the lines planning it adds to VERDICT.lock, and the checks
+  // running on every version, striking out the versions that fail. Nothing
+  // runs: the page only plays it.
+  story: z
+    .object({
+      intro: z.string().min(1),
+      versions: z.array(z.string().min(1)).min(2).optional().describe("The versions the story shows, main first. Default every version"),
+      chapters: z
+        .array(
+          z.object({
+            title: z.string().min(1),
+            method: z.string().min(1).describe('The way of checking this chapter introduces, such as "a model check"'),
+            text: z.string().min(1).describe("What goes wrong in the version this law catches"),
+            law: z.string().min(1).describe("The law, as written in VERDICT.md"),
+            lock: z.string().min(1).describe("The lines planning the law adds to VERDICT.lock"),
+            checks: z.array(z.object({ kind: z.string().min(1), path: z.string().min(1) })).min(1).describe("The enforcers planning adds, as in the lock entry"),
+            fails: z.array(z.string().min(1)).min(1).describe("The versions this law catches"),
+            caughtBy: z.string().optional().describe("The path of the check that catches them, when the law has several"),
+          }),
+        )
+        .min(1),
+      outro: z.string().min(1),
+    })
+    .optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
 
 export const MANIFEST_FILE = "PLAYGROUND.json";
+
+const oneLine = (t: string) => t.replaceAll(/\s+/g, " ").trim();
 
 export function loadManifest(root: string): Manifest {
   const file = join(root, MANIFEST_FILE);
@@ -51,6 +79,14 @@ export function validatePlayground(root: string): string[] {
   const lawsFile = join(root, "VERDICT.md");
   if (!existsSync(lawsFile)) problems.push("no VERDICT.md: add at least one law as a top-level bullet");
   else if (parseLaws(readFileSync(lawsFile, "utf8")).length === 0) problems.push("VERDICT.md has no laws: add a top-level bullet per law");
+  // The story is a script, but the laws and versions it names must still exist.
+  const laws = new Set(existsSync(lawsFile) ? parseLaws(readFileSync(lawsFile, "utf8")).map((l) => oneLine(l.text)) : []);
+  for (const [i, c] of (manifest?.story?.chapters ?? []).entries()) {
+    if (!laws.has(oneLine(c.law))) problems.push(`story chapter ${i + 1}'s law is not a law in VERDICT.md: copy it from there word for word`);
+    for (const v of c.fails) if (!hasVersion(root, manifest!, v)) problems.push(`story chapter ${i + 1} fails version "${v}", which does not exist: add versions/${v}/ or fix the id`);
+    if (c.caughtBy && !c.checks.some((k) => k.path === c.caughtBy)) problems.push(`story chapter ${i + 1} is caught by ${c.caughtBy}, which is not one of its checks: use one of their paths`);
+  }
+  for (const v of manifest?.story?.versions ?? []) if (!hasVersion(root, manifest!, v)) problems.push(`the story shows version "${v}", which does not exist: add versions/${v}/ or fix the id`);
   for (const dir of manifest?.writable ?? []) {
     const n = normalize(dir);
     if (isAbsolute(n) || n.startsWith("..") || n.includes("/") || n === "." || ["VERDICT.md", "VERDICT.lock", MANIFEST_FILE].includes(n)) {

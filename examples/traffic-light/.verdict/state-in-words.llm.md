@@ -9,7 +9,7 @@ The page says each light's state in words, not only by color.
 # What counts as a violation
 - The readout is missing, empty, or does not name the state (red / yellow / green) of BOTH axes (NS and EW).
 - The words can disagree with the lamp colors, or only say something non-state-like (e.g. "active", "go") instead of the color word.
-- The text is hidden or visually unreadable: `display:none`, `visibility:hidden`, zero or tiny font, `aria-hidden`, or a text color nearly equal to the background (`.surface` is `#EEEEF1`).
+- The text is hidden or visually unreadable: `display:none`, `visibility:hidden`, zero or tiny font, `aria-hidden`, or a text color nearly equal to the background (the readout sits on the white page, `#FFFFFF`).
 - The words are only available on hover, in a tooltip, or after a click.
 
 # What passes
