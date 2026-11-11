@@ -221,3 +221,47 @@ textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-r
 .proof { padding:10px 12px; border-radius:8px; background:rgba(17,17,20,.05); }
 .why { margin:0; }
 .points li { border-left-width:3px; border-radius:2px; }
+
+/* The introduction: a scripted story that takes over the laws column while it plays. */
+.storying #versions, .storying .summary, .storying #brief-text, .storying #edit, .storying #laws-list { display:none !important; }
+.story { margin:0 0 24px 16px; padding:20px 24px 22px; border:1px solid var(--line); border-radius:12px; background:var(--paper); box-shadow:0 1px 0 rgba(17,17,20,.03), 0 8px 24px -12px rgba(17,17,20,.12); }
+.story-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.story-bar { display:flex; gap:4px; }
+.story-bar i { width:28px; height:4px; border-radius:2px; background:var(--wash); transition:background-color .3s; }
+.story-bar i.now { background:var(--ink); }
+.story-bar i.done { background:var(--marker); }
+.story h2 { margin:0 0 6px; font:800 24px/30px var(--sans); letter-spacing:-.025em; }
+.story-text { margin:0 0 12px; font-size:15px; line-height:23px; color:var(--ink); }
+.story-note { margin:16px 0 8px; font-size:13px; line-height:20px; color:var(--dim); }
+.proposal { margin:0; padding:14px 16px; border-left:3px solid var(--marker); border-radius:4px; background:#FDFCE6; font:600 17px/25px var(--sans); letter-spacing:-.01em; }
+.proposal code { font:500 .88em var(--mono); background:var(--wash); padding:1px 5px; border-radius:4px; }
+.story-actions { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:20px; }
+.story-actions .link { margin-left:auto; }
+.step-in { animation:rise .38s cubic-bezier(.2,.8,.2,1) both; }
+
+/* What planning adds to VERDICT.lock: added lines, like a diff. */
+.artifact { margin-top:12px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.artifact-head { display:flex; align-items:center; gap:8px; padding:8px 12px; background:#FAFAFB; font-size:13px; font-weight:600; }
+.artifact-head .mono { font-size:12px; font-weight:400; }
+.artifact-head .added { margin-left:auto; font:600 11px var(--mono); color:var(--pass); }
+.artifact pre { margin:0; padding:10px 12px; font-size:12px; line-height:18px; white-space:pre-wrap; overflow-wrap:anywhere; border-top:1px solid var(--line); }
+/* One block per line; a long line wraps under its own text, keeping the YAML indentation readable. */
+.diff span { display:block; padding-left:6ch; text-indent:-6ch; }
+.diff .add { background:#E6F6EE; color:#0A5C38; }
+
+/* The checks planning added, and every version's verdict. */
+.checks-run { display:flex; flex-direction:column; gap:6px; }
+.check-chip { display:flex; align-items:center; gap:10px; }
+.check-chip .mono { font-size:12px; color:var(--dim); overflow-wrap:anywhere; }
+.impls { list-style:none; margin:12px 0 0; padding:0; border-top:1px solid var(--line); }
+.impls li { display:flex; align-items:center; gap:12px; padding:8px 4px; border-bottom:1px solid var(--line); }
+.impls .mark { width:22px; height:22px; }
+.impls .mark svg { width:20px; height:20px; }
+.impl-name { flex:1; min-width:0; font-weight:600; font-size:14px; }
+.impl-word { font:500 12px var(--mono); color:var(--dim); }
+.impls li.out .impl-name { color:var(--faint); text-decoration:line-through; font-weight:500; }
+.impls li.out .mark { opacity:.45; }
+.impls li.fail { animation:flash-red 1.2s ease-out both; }
+.impls li.fail .impl-name { text-decoration:line-through; text-decoration-color:var(--fail); text-decoration-thickness:2px; }
+.impls li.fail .impl-word { color:var(--fail); }
+@keyframes flash-red { from { background-color:#FADADD; } to { background-color:transparent; } }

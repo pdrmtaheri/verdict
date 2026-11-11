@@ -39,6 +39,108 @@
       "id": "real-clock",
       "label": "Real clock",
       "note": "Falls back to Date.now() when no clock is passed in."
+    },
+    {
+      "id": "fault-yellow",
+      "label": "Fault goes yellow",
+      "note": "A fault shows yellow on both roads instead of red."
+    },
+    {
+      "id": "invisible-words",
+      "label": "Invisible words",
+      "note": "The page writes each light's state in words, in white on a white page."
     }
-  ]
+  ],
+  "story": {
+    "intro": "A coding agent wrote this traffic-light controller, plus four more versions of it. All five run, and four of them hide a bug. You won't read every line an agent writes, so write down what must never happen instead, one law at a time. Each law gets the kind of check that suits it, and verdict throws out every version that breaks one.",
+    "versions": [
+      "main",
+      "crossing-bug",
+      "real-clock",
+      "fault-yellow",
+      "invisible-words"
+    ],
+    "chapters": [
+      {
+        "title": "Two roads at once",
+        "method": "a test",
+        "text": "One version lets north-south and east-west go at the same time, and the junction in the preview flashes red. A test suits this law: it runs the controller through every millisecond of three full cycles and fails the moment both roads can go.",
+        "law": "Crossing roads are never allowed to go at once: north-south and east-west are never both green or yellow at the same instant.",
+        "lock": "f6ac1354:\n  law: \"Crossing roads are never allowed to go at once: north-south and east-west\n    are never both green or yellow at the same instant.\"\n  enforcers:\n    - test: .verdict/no-cross-go.test.ts",
+        "checks": [
+          {
+            "kind": "test",
+            "path": ".verdict/no-cross-go.test.ts"
+          }
+        ],
+        "fails": [
+          "crossing-bug"
+        ]
+      },
+      {
+        "title": "A bug you can't see",
+        "method": "a code rule",
+        "text": "This version runs perfectly in the preview. But when nobody gives it a clock, it reads the computer's own, so a test that passes today can fail tomorrow. This law is about what the code is allowed to touch, so it gets a code rule: a semgrep pattern that fails if the controller mentions Date or performance anywhere. A test backs it up.",
+        "law": "The controller never reads the real clock. Time comes only from the `now` function it is given.",
+        "lock": "\"01404813\":\n  law: The controller never reads the real clock. Time comes only from the `now`\n    function it is given.\n  enforcers:\n    - semgrep: .verdict/no-real-clock.yaml\n    - test: .verdict/clock-injected.test.ts",
+        "checks": [
+          {
+            "kind": "semgrep",
+            "path": ".verdict/no-real-clock.yaml"
+          },
+          {
+            "kind": "test",
+            "path": ".verdict/clock-injected.test.ts"
+          }
+        ],
+        "fails": [
+          "real-clock"
+        ],
+        "caughtBy": ".verdict/no-real-clock.yaml"
+      },
+      {
+        "title": "Only after a fault",
+        "method": "a model check",
+        "text": "This version is fine until a fault arrives. Then both roads show yellow, which tells drivers on both roads they may still go. Faults, emergencies and clears can arrive in any order, more orders than anyone would test by hand. So this law gets a model check: TLC explores a TLA+ spec of the controller in every order, and a replay test drives the real code through each one.",
+        "law": "However emergency requests, clears, faults and recoveries are interleaved with the cycle, crossing roads are never both green or yellow in any reachable state.",
+        "lock": "8c0f0f47:\n  law: However emergency requests, clears, faults and recoveries are interleaved\n    with the cycle, crossing roads are never both green or yellow in any\n    reachable state.\n  enforcers:\n    - tla: .verdict/interleave.tla\n    - test: .verdict/interleave-replay.test.ts",
+        "checks": [
+          {
+            "kind": "tla",
+            "path": ".verdict/interleave.tla"
+          },
+          {
+            "kind": "test",
+            "path": ".verdict/interleave-replay.test.ts"
+          }
+        ],
+        "fails": [
+          "fault-yellow"
+        ],
+        "caughtBy": ".verdict/interleave-replay.test.ts"
+      },
+      {
+        "title": "Words you can't read",
+        "method": "a test and an AI review",
+        "text": "This version writes each light's state in words, and the words match the lamps, so this law's test passes. But the words are white on a white page. Whether text is readable takes judgment, so the law also gets an AI review. It reads the page's code and flags the invisible words.",
+        "law": "The page says each light's state in words, not only by color, so someone who can't tell red from green can still read it.",
+        "lock": "bd08809d:\n  law: The page says each light's state in words, not only by color, so someone\n    who can't tell red from green can still read it.\n  enforcers:\n    - test: .verdict/state-in-words.test.ts\n    - llm: .verdict/state-in-words.llm.md",
+        "checks": [
+          {
+            "kind": "test",
+            "path": ".verdict/state-in-words.test.ts"
+          },
+          {
+            "kind": "llm",
+            "path": ".verdict/state-in-words.llm.md"
+          }
+        ],
+        "fails": [
+          "invisible-words"
+        ],
+        "caughtBy": ".verdict/state-in-words.llm.md"
+      }
+    ],
+    "outro": "Four laws, four kinds of check, and all four broken versions are out. Each one passed every law before its own, so you needed all four. The correct controller passed every one. Next, write a law of your own, or connect your agent and have it build against these."
+  }
 }

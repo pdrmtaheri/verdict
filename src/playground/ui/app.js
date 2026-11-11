@@ -308,7 +308,9 @@ async function load() {
   $("dtab-activity").hidden = !m.panels.includes("activity");
   $("dtab-files").hidden = !m.panels.includes("files");
   $("toggle-brief").hidden = !m.panels.includes("brief");
+  $("replay-story").hidden = !m.story;
   renderLaws();
+  renderStory();
   renderFiles();
   renderConnection();
   $("activity-list").replaceChildren();
@@ -410,9 +412,175 @@ $("drawer-handle").onkeydown = (e) => {
   if (e.key === "ArrowDown") { e.preventDefault(); resizeTo(drawer.height - 24); }
 };
 
+// ---------------------------------------------------------------- introduction
+// The story in PLAYGROUND.json, played on first open. It is a script: each
+// chapter shows a law, the lines planning it adds to VERDICT.lock, then the
+// checks running on every version, striking out the ones that fail. Nothing
+// runs on the server; the preview just switches to the version each chapter
+// is about. While it plays it takes over the laws column.
+const story = { at: null, step: 0, running: false, drawn: null };
+const storyKey = () => `playground-story-${P}`;
+const storyDone = () => { try { return localStorage.getItem(storyKey()) === "done"; } catch { return false; } };
+const markDone = () => { try { localStorage.setItem(storyKey(), "done"); } catch {} };
+const mainId = () => state.versions[0].id;
+const chapters = () => state.manifest.story.chapters;
+const isOutro = () => story.at === chapters().length;
+// The versions the story shows: the ones it names, or all of them.
+const storyVersions = () => {
+  const ids = state.manifest.story.versions;
+  return ids ? ids.map((id) => state.versions.find((v) => v.id === id)).filter(Boolean) : state.versions;
+};
+
+// Which chapter threw each version out, as of the chapter shown (its checks done or not).
+function outBy(through) {
+  const out = new Map();
+  for (const [i, c] of chapters().entries()) if (i <= through) for (const v of c.fails) if (!out.has(v)) out.set(v, i);
+  return out;
+}
+
+async function startStory() {
+  story.at = -1;
+  story.step = 0;
+  await showStory();
+}
+function endStory() {
+  markDone();
+  story.at = null;
+  document.body.classList.remove("storying");
+  renderStory();
+}
+async function goChapter(at) {
+  story.at = at;
+  story.step = 0;
+  await showStory();
+}
+async function showStory() {
+  const outro = isOutro();
+  if (outro) markDone();
+  document.body.classList.toggle("storying", story.at !== null && !outro);
+  const version = story.at >= 0 && !outro ? chapters()[story.at].fails[0] : mainId();
+  if (version !== V) await selectVersion(version); // loads, which renders the story
+  else renderStory();
+  $("story").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+// Run the chapter's checks: every version still in spins, then each settles in turn.
+async function runChecks() {
+  story.step = 2;
+  story.running = true;
+  renderStory();
+  await wait(700);
+  story.running = false;
+  renderStory();
+}
+
+function diffBlock(lines) {
+  const pre = el("pre", "diff");
+  for (const [sign, text] of lines) pre.append(el("span", sign === "+" ? "add" : "del", `${sign} ${text}`));
+  return pre;
+}
+
+const passesLaws = (k) => `passes ${k} law${k === 1 ? "" : "s"}`;
+
+// One row per version: its mark, its name, and what the laws say about it.
+// phase: "before" this chapter's checks run, "running", or "after".
+function versionRows(at, phase) {
+  const earlier = outBy(at - 1);
+  const caught = at >= 0 && at < chapters().length ? chapters()[at].fails : [];
+  const list = el("ul", "impls");
+  const by = at >= 0 && at < chapters().length ? chapters()[at].checks.find((k) => k.path === chapters()[at].caughtBy) : null;
+  for (const [n, v] of storyVersions().entries()) {
+    let status, word, cls = "";
+    if (earlier.has(v.id)) [status, word, cls] = ["fail", `failed law ${earlier.get(v.id) + 1}`, "out"];
+    else if (at === chapters().length) [status, word] = ["pass", "passes every law"];
+    else if (phase === "running") [status, word] = ["running", "checking…"];
+    else if (phase === "after" && caught.includes(v.id)) [status, word, cls] = ["fail", by ? `fails law ${at + 1} · ${kindName(by.kind)}` : `fails law ${at + 1}`, "fail"];
+    else if (phase === "after") [status, word] = ["pass", passesLaws(at + 1)];
+    else if (at > 0) [status, word] = ["pass", passesLaws(at)];
+    else [status, word] = ["unchecked", "not checked yet"];
+    const li = el("li", cls);
+    const mark = icon(status);
+    if (cls === "fail") { mark.classList.add("pop"); li.style.animationDelay = `${n * 90}ms`; }
+    li.append(mark, el("span", "impl-name", v.label), el("span", "impl-word", word));
+    list.append(li);
+  }
+  return list;
+}
+
+function renderStory() {
+  const box = $("story");
+  const s = state.manifest.story;
+  box.hidden = story.at === null || !s;
+  if (box.hidden) return;
+  box.replaceChildren();
+  // Animate a new chapter in, not every redraw of the same one.
+  const key = `${story.at}`;
+  if (story.drawn !== key) { box.classList.remove("enter"); void box.offsetWidth; box.classList.add("enter"); story.drawn = key; }
+  const n = s.chapters.length;
+  const outro = isOutro();
+  const chapter = story.at >= 0 && !outro ? s.chapters[story.at] : null;
+
+  const head = el("div", "story-head");
+  head.append(el("span", "label", story.at === -1 ? "Introduction" : outro ? "The result" : `Chapter ${story.at + 1} of ${n}`));
+  const bar = el("div", "story-bar");
+  for (let i = 0; i < n; i++) bar.append(el("i", i < story.at || outro || (i === story.at && story.step === 2 && !story.running) ? "done" : i === story.at ? "now" : ""));
+  head.append(bar);
+  box.append(head);
+
+  const actions = el("div", "story-actions");
+  const primary = (label, onclick) => { const b = el("button", "btn marker", label); b.onclick = onclick; actions.append(b); return b; };
+  const skip = () => { const b = el("button", "link", "Skip the introduction"); b.onclick = endStory; actions.append(b); };
+
+  if (story.at === -1) {
+    box.append(el("h2", "", "Five versions, one of them right"), el("p", "story-text", s.intro));
+    box.append(el("p", "story-note", `${storyVersions().length} versions, no laws yet:`), versionRows(-1, "before"));
+    primary("Write the first law", () => goChapter(0));
+    skip();
+  } else if (outro) {
+    box.append(el("h2", "", "What's left standing"), el("p", "story-text", s.outro), versionRows(n, "after"));
+    primary("Write your own law", () => { endStory(); if ($("edit").hidden) $("toggle-edit").click(); });
+    const b = el("button", "btn", "Connect your agent");
+    b.onclick = () => { endStory(); setDrawer("connect"); };
+    actions.append(b);
+    const done = el("button", "link", "Done");
+    done.onclick = endStory;
+    actions.append(done);
+  } else {
+    box.append(el("h2", "", chapter.title), el("p", "story-text", chapter.text));
+    const label = (id) => state.versions.find((v) => v.id === id)?.label ?? id;
+    box.append(el("p", "story-note", `Law ${story.at + 1}, checked by ${chapter.method}. The preview now shows ${label(chapter.fails[0])}.`));
+    const q = el("blockquote", "proposal");
+    withCode(q, chapter.law);
+    box.append(q);
+    if (story.step >= 1) {
+      const lock = el("div", "artifact step-in");
+      const h = el("div", "artifact-head", "");
+      const lines = chapter.lock.split("\n");
+      h.append(el("span", "", "verdict plan"), el("span", "mono dim", "→ VERDICT.lock"), el("span", "added", `+${lines.length} lines`));
+      lock.append(h, diffBlock(lines.map((l) => ["+", l])));
+      box.append(lock);
+    }
+    if (story.step >= 2) {
+      const checks = el("div", "checks-run step-in");
+      for (const c of chapter.checks) {
+        const row = el("div", "check-chip");
+        row.append(el("span", "chip", kindName(c.kind)), el("span", "mono", c.path));
+        checks.append(row);
+      }
+      box.append(el("p", "story-note", "verdict runs the new checks on every version still in:"), checks, versionRows(story.at, story.running ? "running" : "after"));
+    }
+    if (story.step === 0) primary("Plan this law", () => { story.step = 1; renderStory(); });
+    if (story.step === 1) primary("Run the checks", runChecks);
+    if (story.step === 2 && !story.running) primary(story.at === n - 1 ? "See what's left" : `Write law ${story.at + 2}`, () => goChapter(story.at + 1));
+    skip();
+  }
+  box.append(actions);
+}
+$("replay-story").onclick = startStory;
+
 await load();
 renderConnect();
 reloadPreview();
+if (state.manifest.story && !storyDone()) await startStory();
 let pending = null;
 new EventSource(`/api/events?token=${encodeURIComponent(token)}&p=${encodeURIComponent(P)}`).onmessage = (m) => {
   const a = JSON.parse(m.data);

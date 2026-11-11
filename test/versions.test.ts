@@ -75,6 +75,17 @@ test("while a check runs, a finished law shows its result and an unfinished one 
   expect(lawViews(root, report, [])[0]!.status).toBe("running");
 });
 
+// A manifest whose story has one chapter.
+const story = (lawText: string, fails: string, caughtBy = ".verdict/is-42.sh") =>
+  JSON.stringify({ ...JSON.parse(manifest), story: { intro: "i", chapters: [{ title: "t", method: "a test", text: "x", law: lawText, lock: `${hash}:`, checks: [{ kind: "test", path: ".verdict/is-42.sh" }], fails: [fails], caughtBy }], outro: "o" } });
+
+test("a story must quote current laws and name existing versions", () => {
+  expect(validatePlayground(repo({ ...files(), "PLAYGROUND.json": story(law, "wrong") }))).toEqual([]);
+  expect(validatePlayground(repo({ ...files(), "PLAYGROUND.json": story("The answer is 41.", "wrong") })).join("\n")).toContain("law is not a law in VERDICT.md");
+  expect(validatePlayground(repo({ ...files(), "PLAYGROUND.json": story(law, "ghost") })).join("\n")).toContain('version "ghost", which does not exist');
+  expect(validatePlayground(repo({ ...files(), "PLAYGROUND.json": story(law, "wrong", ".verdict/other.sh") })).join("\n")).toContain("not one of its checks");
+});
+
 test("a check on a version points the enforcer at that folder and changes nothing on disk", async () => {
   const root = make();
   const m = loadManifest(root);
