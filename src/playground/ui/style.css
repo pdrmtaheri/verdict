@@ -19,7 +19,7 @@ button:focus-visible, textarea:focus-visible { outline:2px solid var(--ink); out
 .brand b { font-weight:800; font-size:20px; letter-spacing:-.03em; color:var(--ink); }
 .slash { color:#B4B4BD; font-size:20px; font-weight:400; }
 .bar-right { display:flex; align-items:center; gap:20px; }
-.conn { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:var(--dim); }
+.conn { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:var(--dim); white-space:nowrap; }
 .dot { width:8px; height:8px; border-radius:4px; background:#B4B4BD; display:inline-block; flex-shrink:0; }
 .dot.green { background:var(--pass); } .dot.amber { background:var(--warn); }
 .btn { height:40px; padding:0 20px; border:1px solid var(--ink); border-radius:6px; background:transparent; font-weight:600; font-size:14px; }
@@ -90,20 +90,24 @@ textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-r
 .proof { font:500 13px/18px var(--sans); }
 .empty { padding:24px 16px; color:var(--dim); }
 
-.label-row { display:flex; align-items:center; justify-content:space-between; min-height:28px; margin-bottom:12px; }
+.label-row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:28px; margin-bottom:12px; }
+.label-row .mono { font-size:12px; }
 #preview-frame { display:block; width:100%; flex:1; min-height:0; border:0; border-radius:8px; background:var(--wash); }
 .activity { list-style:none; margin:0; padding:0; }
+.activity li:first-child { border-top:0; }
 .activity li { display:flex; gap:12px; align-items:baseline; padding:8px 0; border-top:1px solid var(--line); font:400 12px/18px var(--mono); }
 .activity .t { width:68px; flex-shrink:0; color:var(--faint); white-space:nowrap; }
 .activity .who { width:52px; flex-shrink:0; font-weight:600; }
 .activity .tool { width:84px; flex-shrink:0; overflow-wrap:anywhere; }
 .activity .sum { flex:1; min-width:0; color:var(--dim); word-break:break-word; }
 .activity li.err .sum { color:var(--fail); }
-.files { display:grid; grid-template-columns:minmax(120px,200px) 1fr; gap:16px; border-top:1px solid var(--line); padding-top:12px; }
-.files ul { list-style:none; margin:0; padding:0; }
-#file-list li { padding:2px 6px; font:13px/20px var(--mono); word-break:break-all; border-radius:4px; cursor:pointer; }
+/* The file list and the file scroll on their own, so picking a file far down the list keeps it in view. */
+#pane-files { height:100%; }
+.files { display:grid; grid-template-columns:minmax(140px,240px) minmax(0,1fr); gap:16px; height:100%; }
+.files ul { list-style:none; margin:0; padding:0; min-height:0; overflow-y:auto; }
+#file-list li { padding:2px 6px; font:13px/20px var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-radius:4px; cursor:pointer; }
 #file-list li:hover { background:var(--wash); } #file-list li.on { background:var(--marker); }
-#file-view { margin:0; font-size:12px; line-height:18px; white-space:pre-wrap; word-break:break-word; }
+#file-view { margin:0; min-height:0; overflow:auto; font-size:12px; line-height:18px; white-space:pre; }
 
 .tabs-row { display:flex; border-bottom:1px solid var(--line); margin:8px 0 20px; }
 .tabs { display:flex; gap:20px; }
@@ -116,7 +120,7 @@ textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-r
 .step p { margin:0 0 10px; font-size:14px; line-height:20px; color:var(--dim); }
 .cmd { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:14px 16px; background:var(--ink); color:#fff; border-radius:6px; }
 .cmd.gap { margin-top:8px; }
-.cmd pre { margin:0; flex:1; min-width:0; font-size:12px; line-height:20px; white-space:pre-wrap; word-break:break-all; }
+.cmd pre { margin:0; flex:1; min-width:0; font-size:12px; line-height:20px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .prompt { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border:1px solid var(--line); border-radius:6px; font-weight:500; font-size:14px; }
 .waiting { display:flex; align-items:center; gap:10px; padding-left:36px; margin-bottom:8px; font-size:13px; font-weight:500; color:var(--dim); }
 
@@ -127,6 +131,11 @@ textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-r
   .side #preview { padding:16px 24px; }
   .bar { padding:12px 24px; }
   h1 { font-size:34px; line-height:38px; }
+}
+@media (max-width: 600px) {
+  /* The connection reads from the dot alone (its text is the tooltip); the words would push Plan and Check onto two lines. */
+  #conn-text { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .bar-right { gap:12px; }
 }
 
 /* Motion */

@@ -20,6 +20,11 @@ export class Events {
     for (const s of this.subs) s(a);
     return a;
   }
+  // Tells subscribers something changed without adding to the log: id -1.
+  ping(tool: string): void {
+    const a: Activity = { id: -1, at: new Date().toISOString(), source: "server", tool, summary: "", isError: false };
+    for (const s of this.subs) s(a);
+  }
   recent(): Activity[] {
     return this.items.slice(-100);
   }

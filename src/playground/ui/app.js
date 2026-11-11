@@ -123,7 +123,9 @@ function lawRow(law, on, index) {
 }
 
 // While a check runs, planned laws and their enforcers read as running; unplanned laws have nothing to run.
-const shown = () => checking
+// Once the server reports the check, it says which laws are still running and has the others' results,
+// so a fast law shows its result without waiting for the slowest one.
+const shown = () => checking && !state.checking
   ? state.laws.map((l) => (l.status === "unplanned" ? l : { ...l, status: "running", enforcers: l.enforcers.map((e) => ({ ...e, status: "running", message: "" })) }))
   : state.laws;
 
@@ -209,6 +211,7 @@ function renderConnection() {
   const latest = ago ?? last;
   $("conn-dot").className = `dot ${latest ? "green" : ""}`;
   $("conn-text").textContent = latest ? "Agent connected" : "No agent connected yet";
+  $("conn-text").parentElement.title = $("conn-text").textContent;
   $("dtab-dot").className = `dot ${latest ? "green" : "amber"}`;
   $("wait-dot").className = `dot ${latest ? "green" : "amber"}`;
   $("wait-text").textContent = latest
@@ -227,7 +230,7 @@ async function openFile(path, li) {
 function renderFiles() {
   const ul = $("file-list");
   ul.replaceChildren();
-  for (const f of state.files) { const li = el("li", "", f); li.onclick = () => openFile(f, li); ul.append(li); }
+  for (const f of state.files) { const li = el("li", "", f); li.title = f; li.onclick = () => openFile(f, li); ul.append(li); }
   if (state.files.length === 0) ul.append(el("li", "dim", "no files yet"));
 }
 
@@ -235,7 +238,8 @@ function renderConnect() {
   const base = location.origin;
   const many = state.playgrounds.length > 1;
   const url = `${base}/mcp/${state.id}?token=${token}`;
-  $("cmd-claude").textContent = `claude mcp add --transport http ${many ? `playground-${state.id}` : "playground"} \\\n  "${url}"`;
+  // One line: a "\\" continuation wraps onto a line of its own in a narrow panel.
+  $("cmd-claude").textContent = `claude mcp add --transport http ${many ? `playground-${state.id}` : "playground"} "${url}"`;
   $("cmd-url").textContent = `${base}/mcp/${state.id}`;
   $("cmd-header").textContent = `Authorization: Bearer ${token}`;
 }
@@ -412,7 +416,7 @@ reloadPreview();
 let pending = null;
 new EventSource(`/api/events?token=${encodeURIComponent(token)}&p=${encodeURIComponent(P)}`).onmessage = (m) => {
   const a = JSON.parse(m.data);
-  if (a.id === 0) return;
+  if (a.id === 0) return; // the stream's hello; a ping (id -1) is a law of a running check finishing
   clearTimeout(pending);
   pending = setTimeout(load, 150); // a burst of tool calls reloads once
   if (a.tool === "write_file" && !a.isError && (a.summary.startsWith("public/") || a.summary.startsWith(`versions/${V}/public/`))) reloadPreview();

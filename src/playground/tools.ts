@@ -53,15 +53,19 @@ export function writablePath(root: string, writable: string[], path: string, ver
 export interface PlaygroundState {
   last: LawReport[] | null; // the latest report, for whichever version was checked
   byVersion: Record<string, LawReport[]>; // the latest report per version
+  // While a version is being checked: the laws that have finished so far, so the
+  // page can show a fast law's result without waiting for the slowest one.
+  running: Record<string, LawReport[]>;
+  onProgress?: () => void; // called when a law of a running check finishes
 }
 
-export const newState = (): PlaygroundState => ({ last: null, byVersion: {} });
+export const newState = (): PlaygroundState => ({ last: null, byVersion: {}, running: {} });
 
 // Runs every law's enforcers on one version's code. Nothing is copied or
 // changed: each enforcer is given the version's folder as its target, and the
 // sandbox is read-only apart from its own temp directory. The code was written
 // by an agent, so it never runs unconfined.
-export async function checkVersion(root: string, m: Manifest, version: string): Promise<LawReport[]> {
+export async function checkVersion(root: string, m: Manifest, version: string, onLaw: (report: LawReport) => void = () => {}): Promise<LawReport[]> {
   const target = versionTarget(root, m, version);
   const laws = parseLaws(existsSync(join(root, LAWS_FILE)) ? readFileSync(join(root, LAWS_FILE), "utf8") : "");
   const lock = readLock(join(root, LOCK_FILE));
@@ -69,9 +73,11 @@ export async function checkVersion(root: string, m: Manifest, version: string): 
     laws.map(async (law): Promise<LawReport> => {
       const entry = lock.get(law.hash);
       // Main also replays a break when its pinned inputs changed; another version's code is not what the breaks were made against.
-      return entry
-        ? checkLaw(at(root), entry, { sandbox: { readable: [target], writable: [] }, target, exclude: target === root ? ["versions"] : undefined, hash: law.hash, replay: target === root ? undefined : false })
+      const report: LawReport = entry
+        ? await checkLaw(at(root), entry, { sandbox: { readable: [target], writable: [] }, target, exclude: target === root ? ["versions"] : undefined, hash: law.hash, replay: target === root ? undefined : false })
         : { law: law.text, status: "unplanned", details: [] };
+      onLaw(report);
+      return report;
     }),
   );
 }
@@ -87,7 +93,17 @@ export function playgroundTools(root: string, state: PlaygroundState, log: (line
     const m = manifest();
     const v = version ?? MAIN;
     if (!hasVersion(root, m, v)) throw new Error(`there is no version "${v}": use one of ${versionList(root, m).map((x) => x.id).join(", ")}`);
-    const report = await checkVersion(root, m, v);
+    const done: LawReport[] = [];
+    state.running[v] = done;
+    let report: LawReport[];
+    try {
+      report = await checkVersion(root, m, v, (r) => {
+        done.push(r);
+        state.onProgress?.();
+      });
+    } finally {
+      delete state.running[v];
+    }
     state.last = state.byVersion[v] = report;
     return `${versionList(root, m).length > 1 ? `version ${v}\n` : ""}${format(report)}`;
   };
