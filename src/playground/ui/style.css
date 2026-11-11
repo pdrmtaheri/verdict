@@ -249,19 +249,60 @@ textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-r
 .diff span { display:block; padding-left:6ch; text-indent:-6ch; }
 .diff .add { background:#E6F6EE; color:#0A5C38; }
 
-/* The checks planning added, and every version's verdict. */
+/* The checks planning added. */
 .checks-run { display:flex; flex-direction:column; gap:6px; }
 .check-chip { display:flex; align-items:center; gap:10px; }
 .check-chip .mono { font-size:12px; color:var(--dim); overflow-wrap:anywhere; }
-.impls { list-style:none; margin:12px 0 0; padding:0; border-top:1px solid var(--line); }
-.impls li { display:flex; align-items:center; gap:12px; padding:8px 4px; border-bottom:1px solid var(--line); }
-.impls .mark { width:22px; height:22px; }
-.impls .mark svg { width:20px; height:20px; }
-.impl-name { flex:1; min-width:0; font-weight:600; font-size:14px; }
-.impl-word { font:500 12px var(--mono); color:var(--dim); }
-.impls li.out .impl-name { color:var(--faint); text-decoration:line-through; font-weight:500; }
-.impls li.out .mark { opacity:.45; }
-.impls li.fail { animation:flash-red 1.2s ease-out both; }
-.impls li.fail .impl-name { text-decoration:line-through; text-decoration-color:var(--fail); text-decoration-thickness:2px; }
-.impls li.fail .impl-word { color:var(--fail); }
-@keyframes flash-red { from { background-color:#FADADD; } to { background-color:transparent; } }
+.story-result { margin:14px 0 0; padding:10px 12px; border-radius:8px; background:#F3F3F5; font-size:14px; line-height:20px; font-weight:500; }
+
+/* The versions above the preview while the story plays. Rows are updated in place as checks run. */
+.impls-panel { flex-shrink:0; padding:20px 32px 4px; }
+.impls-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.impls-head .dim { font-size:12px; }
+.impl-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.impl-btn { display:flex; align-items:center; gap:10px; width:100%; height:36px; padding:0 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); text-align:left; transition:border-color .15s, background-color .3s; }
+.impl-btn:hover { border-color:var(--ink); }
+.impl.on .impl-btn { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+.impl .mark { width:20px; height:20px; }
+.impl .mark svg { width:18px; height:18px; }
+.impl-name { flex:1; min-width:0; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.impl-word { flex-shrink:0; font:500 11px var(--mono); color:var(--dim); }
+.impl.fail .impl-btn { animation:flash-red 1.2s ease-out both; }
+.impl.fail .impl-name { text-decoration:line-through; text-decoration-color:var(--fail); text-decoration-thickness:2px; }
+.impl.fail .impl-word { color:var(--fail); }
+.impl.out .impl-name { color:var(--faint); text-decoration:line-through; font-weight:500; }
+.impl.out .mark { opacity:.45; }
+@keyframes flash-red { from { background-color:#FADADD; } to { background-color:var(--paper); } }
+
+/* Preview or code. */
+.view-tabs { display:flex; align-items:center; gap:4px; }
+.vt { height:28px; padding:0 10px; border:0; border-radius:6px; background:none; font:600 12px/1 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+.vt:hover { background:var(--wash); color:var(--ink); }
+.vt.on { background:var(--ink); color:#fff; }
+#view-version { margin-left:8px; font-size:12px; }
+.code-view { flex:1; min-height:0; overflow:auto; border-radius:8px; background:#FAFAFB; border:1px solid var(--line); }
+.code-head { position:sticky; top:0; z-index:1; display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:8px 12px; background:#FAFAFB; border-bottom:1px solid var(--line); font-size:12px; }
+.code-lines { margin:0; padding:6px 0; font-size:12px; line-height:18px; }
+.code-lines .ln { display:block; padding:0 12px 0 0; white-space:pre; }
+.code-lines .ln i { display:inline-block; width:44px; padding-right:12px; text-align:right; font-style:normal; color:var(--faint); user-select:none; }
+.code-lines .ln.chg { background:#FDF3C4; box-shadow:inset 3px 0 0 var(--warn); }
+.code-view .empty { padding:16px; }
+
+/* The code view as a read-only editor: file tabs, a gutter, and syntax colors. */
+.code-tabs { position:sticky; top:0; z-index:2; display:flex; gap:2px; padding:6px 6px 0; background:#F1F1F4; border-bottom:1px solid var(--line); overflow-x:auto; }
+.code-tab { display:flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:1px solid transparent; border-bottom:0; border-radius:6px 6px 0 0; background:none; font:500 12px var(--mono); color:var(--dim); white-space:nowrap; }
+.code-tab:hover { color:var(--ink); }
+.code-tab.on { background:#FAFAFB; border-color:var(--line); color:var(--ink); margin-bottom:-1px; }
+.code-dot { width:6px; height:6px; border-radius:3px; background:var(--warn); }
+.code-tabs + .code-head { top:37px; }
+.code-lines .ln { padding-right:16px; }
+.code-lines .ln i { position:sticky; left:0; background:#FAFAFB; }
+.code-lines .ln.chg i { background:#FDF3C4; }
+.tk-comment { color:#6E7781; font-style:italic; }
+.tk-string { color:#0A3069; }
+.tk-number { color:#0550AE; }
+.tk-keyword { color:#CF222E; }
+.tk-fn { color:#8250DF; }
+.tk-tag { color:#116329; }
+.tk-attr, .tk-prop { color:#0550AE; }
+.tk-punct { color:#6E7781; }
