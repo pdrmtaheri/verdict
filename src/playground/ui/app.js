@@ -289,6 +289,8 @@ async function selectVersion(id) {
   selected = null;
   await load();
   reloadPreview();
+  markSelected();
+  if (view === "code") await showCode();
 }
 
 async function load() {
@@ -309,6 +311,7 @@ async function load() {
   $("dtab-files").hidden = !m.panels.includes("files");
   $("toggle-brief").hidden = !m.panels.includes("brief");
   $("replay-story").hidden = !m.story;
+  markSelected();
   renderLaws();
   renderStory();
   renderFiles();
@@ -347,7 +350,7 @@ const toggle = (id, on) => { $(id).hidden = on ?? !$(id).hidden; };
 $("check").onclick = () => run($("check"), "/api/check");
 $("check-all").onclick = () => run($("check"), "/api/check?v=all");
 $("plan").onclick = () => run($("plan"), "/api/plan");
-$("reload").onclick = reloadPreview;
+$("reload").onclick = () => { reloadPreview(); if (view === "code") void showCode(); };
 $("toggle-brief").onclick = () => toggle("brief-text");
 $("toggle-edit").onclick = () => {
   toggle("edit");
@@ -412,12 +415,155 @@ $("drawer-handle").onkeydown = (e) => {
   if (e.key === "ArrowDown") { e.preventDefault(); resizeTo(drawer.height - 24); }
 };
 
+// ---------------------------------------------------------------- code view
+// The Code tab: the selected version's code next to the preview. For a version
+// other than the first, each file that differs from the first version's is
+// shown whole, with the changed lines marked and scrolled into view.
+let view = "preview";
+function setView(v) {
+  view = v;
+  for (const b of document.querySelectorAll(".vt")) {
+    b.classList.toggle("on", b.dataset.view === v);
+    b.setAttribute("aria-selected", String(b.dataset.view === v));
+  }
+  $("preview-frame").hidden = v !== "preview";
+  $("code-view").hidden = v !== "code";
+  if (v === "code") void showCode();
+}
+for (const b of document.querySelectorAll(".vt")) b.onclick = () => setView(b.dataset.view);
+
+const fileText = async (path) => {
+  const r = await api(`/api/file?path=${encodeURIComponent(path)}`);
+  return r.ok ? r.text() : null;
+};
+// The lines of `b`, each marked changed or not against `a` (longest common subsequence).
+function lineDiff(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0;
+  while (j < b.length) {
+    if (i < a.length && a[i] === b[j]) { out.push({ text: b[j], changed: false }); i++; j++; }
+    else if (i < a.length && dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else { out.push({ text: b[j], changed: true }); j++; }
+  }
+  return out;
+}
+// Syntax highlighting for the code view, by file type: a small tokenizer per
+// language, enough for the files a playground's preview is made of. Tokens are
+// [class, text]; the page inserts them as text, never as HTML.
+const JS_KEYWORDS = new Set("as async await break case catch class const continue debugger default delete do else enum export extends finally for from function if implements import in instanceof interface let new of return super switch this throw try type typeof var void while with yield".split(" "));
+const JS_LITERALS = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
+function tokensWith(src, re, classify) {
+  const out = [];
+  let last = 0;
+  for (const m of src.matchAll(re)) {
+    if (m.index > last) out.push(["", src.slice(last, m.index)]);
+    out.push([classify(m, src), m[0]]);
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push(["", src.slice(last)]);
+  return out;
+}
+const tokensJs = (src) => tokensWith(src, /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|(\b\d[\d_]*(?:\.\d+)?(?:e[+-]?\d+)?\b)|([A-Za-z_$][\w$]*)/g, (m, all) => {
+  if (m[1]) return "tk-comment";
+  if (m[2]) return "tk-string";
+  if (m[3]) return "tk-number";
+  if (JS_KEYWORDS.has(m[4])) return "tk-keyword";
+  if (JS_LITERALS.has(m[4])) return "tk-number";
+  return /^\s*\(/.test(all.slice(m.index + m[0].length)) ? "tk-fn" : "";
+});
+const tokensCss = (src) => tokensWith(src, /(\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(#[0-9a-fA-F]{3,8}\b)|(-?\b\d*\.?\d+(?:px|em|rem|%|ms|s|vh|vw|ch|deg|fr)?\b)|((?:--)?[a-zA-Z][\w-]*(?=\s*:))|(@[a-z-]+)/g, (m) =>
+  m[1] ? "tk-comment" : m[2] ? "tk-string" : m[3] || m[4] ? "tk-number" : m[5] ? "tk-prop" : "tk-keyword");
+// HTML: tags and their attributes, with the insides of <style> and <script> highlighted as CSS and JS.
+function tokensHtml(src) {
+  const out = [];
+  let last = 0, inside = null;
+  for (const m of src.matchAll(/<!--[\s\S]*?-->|<\/?[a-zA-Z][^>]*>/g)) {
+    const between = src.slice(last, m.index);
+    const closes = inside && new RegExp(`^</${inside}`, "i").test(m[0]);
+    if (inside && !closes) continue; // a tag-looking string inside a script or style
+    if (between) out.push(...(inside === "style" ? tokensCss(between) : inside === "script" ? tokensJs(between) : [["", between]]));
+    if (m[0].startsWith("<!--")) out.push(["tk-comment", m[0]]);
+    else {
+      const [, open, name, attrs, end] = /^(<\/?)([\w-]+)([\s\S]*?)(\/?>)$/.exec(m[0]);
+      out.push(["tk-punct", open], ["tk-tag", name], ...tokensWith(attrs, /("[^"]*"|'[^']*')|([\w:-]+)/g, (a) => (a[1] ? "tk-string" : "tk-attr")), ["tk-punct", end]);
+    }
+    inside = closes ? null : !m[0].startsWith("</") && /^<(style|script)\b/i.test(m[0]) ? m[0].slice(1).match(/^\w+/)[0].toLowerCase() : inside;
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push(...(inside === "style" ? tokensCss(src.slice(last)) : inside === "script" ? tokensJs(src.slice(last)) : [["", src.slice(last)]]));
+  return out;
+}
+function highlight(path, src) {
+  const tokens = /\.(m?[jt]sx?)$/.test(path) ? tokensJs(src) : path.endsWith(".css") ? tokensCss(src) : /\.html?$/.test(path) ? tokensHtml(src) : [["", src]];
+  // Split the tokens into lines, so a comment or string spanning lines keeps its color on each.
+  const lines = [[]];
+  for (const [cls, text] of tokens) {
+    for (const [i, part] of text.split("\n").entries()) {
+      if (i > 0) lines.push([]);
+      if (part) lines.at(-1).push([cls, part]);
+    }
+  }
+  return lines;
+}
+
+// Every file in the version's public/, with the lines that differ from the first version marked.
+const codeTab = { file: null };
+async function showCode() {
+  const version = V;
+  const first = state.versions[0];
+  const prefix = version === first.id ? "" : `versions/${version}/`;
+  const ours = state.files.filter((f) => f.startsWith("public/"));
+  const files = (await Promise.all(ours.map(async (f) => {
+    const [mine, base] = await Promise.all([fileText(prefix + f), prefix ? fileText(f) : null]);
+    if (mine === null) return null;
+    const lines = !prefix ? mine.split("\n").map((t) => ({ text: t, changed: false })) : base === null ? mine.split("\n").map((t) => ({ text: t, changed: true })) : lineDiff(base.split("\n"), mine.split("\n"));
+    return { path: f, text: mine, lines, changes: lines.filter((l) => l.changed).length };
+  }))).filter(Boolean);
+  if (version !== V || view !== "code") return; // switched while loading
+  const box = $("code-view");
+  box.replaceChildren();
+  if (files.length === 0) { box.append(el("p", "empty", `No code in public/ for ${state.versions.find((v) => v.id === version)?.label ?? version} yet.`)); return; }
+  // Keep the open file across versions; otherwise open the first that differs, or the first script.
+  const open = files.find((f) => f.path === codeTab.file) ?? files.find((f) => f.changes > 0) ?? files.find((f) => f.path.endsWith(".js")) ?? files[0];
+  codeTab.file = open.path;
+  const tabs = el("div", "code-tabs");
+  tabs.setAttribute("role", "tablist");
+  for (const f of files) {
+    const t = el("button", `code-tab${f === open ? " on" : ""}`, fileName(f.path));
+    t.type = "button";
+    t.setAttribute("role", "tab");
+    t.setAttribute("aria-selected", String(f === open));
+    t.title = f.changes ? `${f.path}: ${f.changes} line${f.changes === 1 ? " differs" : "s differ"} from ${first.label}` : f.path;
+    if (f.changes) t.append(el("i", "code-dot"));
+    t.onclick = () => { codeTab.file = f.path; void showCode(); };
+    tabs.append(t);
+  }
+  const note = !prefix ? "the reference version" : open.changes ? `${open.changes} line${open.changes === 1 ? " differs" : "s differ"} from ${first.label}` : `same as ${first.label}`;
+  const head = el("div", "code-head");
+  head.append(el("span", "mono", open.path), el("span", "dim", `${note} · read-only`));
+  const pre = el("pre", "code-lines");
+  const colored = highlight(open.path, open.text);
+  for (const [n, l] of open.lines.entries()) {
+    const line = el("span", l.changed ? "ln chg" : "ln");
+    line.append(el("i", "", String(n + 1)));
+    const parts = colored[n] ?? [];
+    if (parts.length === 0) line.append(document.createTextNode(" "));
+    for (const [cls, text] of parts) line.append(cls ? el("span", cls, text) : document.createTextNode(text));
+    pre.append(line);
+  }
+  box.append(tabs, head, pre);
+  box.querySelector(".chg")?.scrollIntoView({ block: "center" });
+}
+
 // ---------------------------------------------------------------- introduction
 // The story in PLAYGROUND.json, played on first open. It is a script: each
 // chapter shows a law, the lines planning it adds to VERDICT.lock, then the
 // checks running on every version, striking out the ones that fail. Nothing
-// runs on the server; the preview just switches to the version each chapter
-// is about. While it plays it takes over the laws column.
+// runs on the server. While it plays it takes over the laws column, and the
+// versions sit above the preview: click one to watch it or read its code.
+// Their marks are updated in place as the checks go, never redrawn.
 const story = { at: null, step: 0, running: false, drawn: null };
 const storyKey = () => `playground-story-${P}`;
 const storyDone = () => { try { return localStorage.getItem(storyKey()) === "done"; } catch { return false; } };
@@ -441,12 +587,14 @@ function outBy(through) {
 async function startStory() {
   story.at = -1;
   story.step = 0;
+  buildImpls();
   await showStory();
 }
 function endStory() {
   markDone();
   story.at = null;
   document.body.classList.remove("storying");
+  $("impls").hidden = true;
   renderStory();
 }
 async function goChapter(at) {
@@ -458,6 +606,9 @@ async function showStory() {
   const outro = isOutro();
   if (outro) markDone();
   document.body.classList.toggle("storying", story.at !== null && !outro);
+  // Versions caught in an earlier chapter settle into "out" (once, so they don't flash again).
+  for (const [id, i] of outBy(story.at - 1)) if (!implRow(id)?.classList.contains("out")) setImpl(id, "fail", `failed law ${i + 1}`, "out");
+  if (outro) for (const v of storyVersions()) if (!outBy(chapters().length - 1).has(v.id)) setImpl(v.id, "pass", "passes every law");
   const version = story.at >= 0 && !outro ? chapters()[story.at].fails[0] : mainId();
   if (version !== V) await selectVersion(version); // loads, which renders the story
   else renderStory();
@@ -468,9 +619,56 @@ async function runChecks() {
   story.step = 2;
   story.running = true;
   renderStory();
-  await wait(700);
+  const at = story.at;
+  const chapter = chapters()[at];
+  const by = chapter.checks.find((k) => k.path === chapter.caughtBy);
+  const live = storyVersions().filter((v) => !outBy(at - 1).has(v.id));
+  for (const v of live) setImpl(v.id, "running", "checking…");
+  for (const v of live) {
+    await wait(420);
+    if (story.at !== at) return; // skipped away
+    if (chapter.fails.includes(v.id)) setImpl(v.id, "fail", by ? `fails law ${at + 1} · ${kindName(by.kind)}` : `fails law ${at + 1}`, "fail");
+    else setImpl(v.id, "pass", passesLaws(at + 1));
+  }
   story.running = false;
   renderStory();
+}
+
+// The versions panel: built once per playthrough, then only updated in place.
+function buildImpls() {
+  const box = $("impls");
+  box.replaceChildren(el("div", "impls-head", ""));
+  box.firstChild.append(el("span", "label", "Implementations"), el("span", "dim", "Click one to watch it or read its code"));
+  const list = el("ul", "impl-list");
+  for (const v of storyVersions()) {
+    const li = el("li", "impl");
+    li.dataset.id = v.id;
+    const b = el("button", "impl-btn");
+    b.type = "button";
+    b.append(icon("unchecked"), el("span", "impl-name", v.label), el("span", "impl-word", "not checked yet"));
+    b.onclick = () => selectVersion(v.id);
+    li.append(b);
+    list.append(li);
+  }
+  box.append(list);
+  box.hidden = false;
+  markSelected();
+}
+const implRow = (id) => $("impls").querySelector(`[data-id="${CSS.escape(id)}"]`);
+function setImpl(id, status, word, cls = "") {
+  const li = implRow(id);
+  if (!li) return;
+  const mark = icon(status);
+  if (status === "pass" || status === "fail") mark.classList.add("pop");
+  li.querySelector(".mark").replaceWith(mark);
+  li.querySelector(".impl-word").textContent = word;
+  li.className = `impl ${cls}`.trim();
+  li.classList.toggle("on", id === V);
+}
+function markSelected() {
+  for (const li of document.querySelectorAll("#impls .impl")) li.classList.toggle("on", li.dataset.id === V);
+  const label = state.versions.find((v) => v.id === V)?.label ?? V;
+  $("view-version").textContent = state.versions.length > 1 ? label : "";
 }
 
 function diffBlock(lines) {
@@ -480,31 +678,6 @@ function diffBlock(lines) {
 }
 
 const passesLaws = (k) => `passes ${k} law${k === 1 ? "" : "s"}`;
-
-// One row per version: its mark, its name, and what the laws say about it.
-// phase: "before" this chapter's checks run, "running", or "after".
-function versionRows(at, phase) {
-  const earlier = outBy(at - 1);
-  const caught = at >= 0 && at < chapters().length ? chapters()[at].fails : [];
-  const list = el("ul", "impls");
-  const by = at >= 0 && at < chapters().length ? chapters()[at].checks.find((k) => k.path === chapters()[at].caughtBy) : null;
-  for (const [n, v] of storyVersions().entries()) {
-    let status, word, cls = "";
-    if (earlier.has(v.id)) [status, word, cls] = ["fail", `failed law ${earlier.get(v.id) + 1}`, "out"];
-    else if (at === chapters().length) [status, word] = ["pass", "passes every law"];
-    else if (phase === "running") [status, word] = ["running", "checking…"];
-    else if (phase === "after" && caught.includes(v.id)) [status, word, cls] = ["fail", by ? `fails law ${at + 1} · ${kindName(by.kind)}` : `fails law ${at + 1}`, "fail"];
-    else if (phase === "after") [status, word] = ["pass", passesLaws(at + 1)];
-    else if (at > 0) [status, word] = ["pass", passesLaws(at)];
-    else [status, word] = ["unchecked", "not checked yet"];
-    const li = el("li", cls);
-    const mark = icon(status);
-    if (cls === "fail") { mark.classList.add("pop"); li.style.animationDelay = `${n * 90}ms`; }
-    li.append(mark, el("span", "impl-name", v.label), el("span", "impl-word", word));
-    list.append(li);
-  }
-  return list;
-}
 
 function renderStory() {
   const box = $("story");
@@ -532,11 +705,11 @@ function renderStory() {
 
   if (story.at === -1) {
     box.append(el("h2", "", "Five versions, one of them right"), el("p", "story-text", s.intro));
-    box.append(el("p", "story-note", `${storyVersions().length} versions, no laws yet:`), versionRows(-1, "before"));
+    box.append(el("p", "story-note", `The ${storyVersions().length} versions are on the right, above the preview. Click one to watch it run or read its code.`));
     primary("Write the first law", () => goChapter(0));
     skip();
   } else if (outro) {
-    box.append(el("h2", "", "What's left standing"), el("p", "story-text", s.outro), versionRows(n, "after"));
+    box.append(el("h2", "", "What's left standing"), el("p", "story-text", s.outro));
     primary("Write your own law", () => { endStory(); if ($("edit").hidden) $("toggle-edit").click(); });
     const b = el("button", "btn", "Connect your agent");
     b.onclick = () => { endStory(); setDrawer("connect"); };
@@ -566,7 +739,14 @@ function renderStory() {
         row.append(el("span", "chip", kindName(c.kind)), el("span", "mono", c.path));
         checks.append(row);
       }
-      box.append(el("p", "story-note", "verdict runs the new checks on every version still in:"), checks, versionRows(story.at, story.running ? "running" : "after"));
+      box.append(el("p", "story-note", "verdict runs the new checks on every version still in. Watch the list on the right."), checks);
+      if (!story.running) {
+        const caught = chapter.fails.map(label).join(" and ");
+        const left = storyVersions().filter((v) => !outBy(story.at).has(v.id));
+        const laws = story.at === 0 ? "it" : `all ${story.at + 1} laws`;
+        const rest = left.length === 1 ? `${left[0].label}, the only version left, passes ${laws}.` : `Every other version still in passes ${laws}.`;
+        box.append(el("p", "story-result step-in", `${caught} ${chapter.fails.length === 1 ? "is" : "are"} out. ${rest}`));
+      }
     }
     if (story.step === 0) primary("Plan this law", () => { story.step = 1; renderStory(); });
     if (story.step === 1) primary("Run the checks", runChecks);

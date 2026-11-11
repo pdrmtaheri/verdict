@@ -40,9 +40,14 @@
     <div id="laws-list" class="lawlist"><div class="band" aria-hidden="true"></div><div id="law-rows"></div></div>
   </section>
   <aside class="side">
+    <section id="impls" class="impls-panel" aria-label="Implementations" hidden></section>
     <section id="preview" aria-label="Preview">
-      <div class="label-row"><div><span class="label">Preview</span> <span class="mono dim">public/index.html</span></div><button id="reload" class="link">Reload</button></div>
+      <div class="label-row">
+        <div class="view-tabs" role="tablist" aria-label="Preview or code"><button class="vt on" data-view="preview" role="tab" aria-selected="true">Preview</button><button class="vt" data-view="code" role="tab" aria-selected="false">Code</button><span id="view-version" class="mono dim"></span></div>
+        <button id="reload" class="link">Reload</button>
+      </div>
       <iframe id="preview-frame" sandbox="allow-scripts" title="The program the agent builds" referrerpolicy="no-referrer"></iframe>
+      <div id="code-view" class="code-view" hidden></div>
     </section>
     <div id="drawer" class="drawer">
       <div id="drawer-handle" class="handle" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the panel" tabindex="0"></div>
