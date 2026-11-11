@@ -1,7 +1,8 @@
-// scope: every method of createController() in public/controller.js (state, emergency, clear, fault, recover). Loads a
-// fresh copy of the controller with Date, performance and process.hrtime booby-trapped (any use throws), then checks
-// the controller follows only the supplied now() across a full cycle, repeatedly, out of order, and through
-// emergency/fault/recover sequences. Timers and app.js are not covered.
+// scope: every method of createController() in public/controller.js (state, emergency, clear, fault, recover), and
+// createController() given no clock at all. Loads a fresh copy of the controller with Date, performance and
+// process.hrtime booby-trapped (any use throws), then checks the answers depend only on the supplied now(): the same
+// times and events give the same lights, whatever the real clock says. It does not check the schedule itself (which
+// light shows when); other laws do. Timers and app.js are not covered.
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 
@@ -35,24 +36,29 @@ function load() {
   return mod.exports;
 }
 
+// The lights a controller shows at each step of a script of times and events.
+function replay(createController: any, script: Array<number | string>): string[] {
+  let clock = 0;
+  const c = createController({ now: () => clock });
+  const seen: string[] = [];
+  for (const step of script) {
+    if (typeof step === 'number') clock = step;
+    else c[step](step === 'emergency' ? 'ew' : undefined);
+    const s = c.state();
+    seen.push(`${clock}:${s.ns}/${s.ew}`);
+  }
+  return seen;
+}
+
 test('state() depends only on the supplied now(), never on the real clock', () => {
   withTrappedClock(() => {
     const { createController, CYCLE_MS } = load();
-    let clock = 0;
+    const times = [0, 9999, 10000, 13000, 15000, 25000, 28000, CYCLE_MS, CYCLE_MS * 1000 + 11000, 0, 16000, 16000];
+    // Two controllers fed the same times agree, and asking twice at one time gives one answer.
+    expect(replay(createController, times)).toEqual(replay(createController, times));
+    let clock = 16000;
     const c = createController({ now: () => clock });
-    const expected: Array<[number, string, string]> = [
-      [0, 'green', 'red'], [9999, 'green', 'red'], [10000, 'yellow', 'red'],
-      [13000, 'red', 'red'], [15000, 'red', 'green'], [25000, 'red', 'yellow'],
-      [28000, 'red', 'red'], [CYCLE_MS, 'green', 'red'], [CYCLE_MS * 1000 + 11000, 'yellow', 'red'],
-      [0, 'green', 'red'],
-    ];
-    for (const [t, ns, ew] of expected) {
-      clock = t;
-      expect(c.state()).toEqual({ ns, ew });
-    }
-    clock = 16000;
-    const a = c.state();
-    expect(c.state()).toEqual(a);
+    expect(c.state()).toEqual(c.state());
   });
 });
 
@@ -69,41 +75,21 @@ test('every state() call asks now() exactly once', () => {
 test('emergency, clear, fault and recover take time only from now()', () => {
   withTrappedClock(() => {
     const { createController } = load();
-    let clock = 0;
-    const c = createController({ now: () => clock });
+    const script = ['emergency', 15000, 60000, 'clear', 62999, 70000, 'fault', 80000, 500000, 600000, 'recover', 601999, 602000, 'emergency', 650000, 'fault', 700000];
+    expect(replay(createController, script)).toEqual(replay(createController, script));
+  });
+});
 
-    // emergency for ew: hold ew green past its normal length, clear() restarts its clock from now()
-    c.emergency('ew');
-    clock = 15000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'green' });
-    clock = 60000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'green' });
-    c.clear();
-    clock = 62999;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'green' });
-    clock = 70000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'yellow' });
-
-    // fault while green-ish: waits for all red, then both red
-    c.fault();
-    clock = 80000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'red' });
-    clock = 500000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'red' });
-
-    // recover restarts from all red at now()
-    clock = 600000;
-    c.recover();
-    expect(c.state()).toEqual({ ns: 'red', ew: 'red' });
-    clock = 601999;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'red' });
-    clock = 602000;
-    expect(c.state()).toEqual({ ns: 'red', ew: 'green' });
-
-    // fault while held green: the held green restarts its clock at now()
-    c.emergency('ew');
-    clock = 650000;
-    c.fault();
-    expect(c.state()).toEqual({ ns: 'red', ew: 'green' });
+test('a controller given no clock never falls back to the real one', () => {
+  withTrappedClock(() => {
+    const { createController } = load();
+    // Refusing to run without a clock is fine; reading the real clock instead is not.
+    let error = '';
+    try {
+      createController({}).state();
+    } catch (e) {
+      error = String(e);
+    }
+    expect(error).not.toContain('real clock read');
   });
 });
