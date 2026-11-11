@@ -209,6 +209,7 @@ function renderConnection() {
   const latest = ago ?? last;
   $("conn-dot").className = `dot ${latest ? "green" : ""}`;
   $("conn-text").textContent = latest ? "Agent connected" : "No agent connected yet";
+  $("conn-text").parentElement.title = $("conn-text").textContent;
   $("dtab-dot").className = `dot ${latest ? "green" : "amber"}`;
   $("wait-dot").className = `dot ${latest ? "green" : "amber"}`;
   $("wait-text").textContent = latest
@@ -227,7 +228,7 @@ async function openFile(path, li) {
 function renderFiles() {
   const ul = $("file-list");
   ul.replaceChildren();
-  for (const f of state.files) { const li = el("li", "", f); li.onclick = () => openFile(f, li); ul.append(li); }
+  for (const f of state.files) { const li = el("li", "", f); li.title = f; li.onclick = () => openFile(f, li); ul.append(li); }
   if (state.files.length === 0) ul.append(el("li", "dim", "no files yet"));
 }
 
@@ -235,7 +236,8 @@ function renderConnect() {
   const base = location.origin;
   const many = state.playgrounds.length > 1;
   const url = `${base}/mcp/${state.id}?token=${token}`;
-  $("cmd-claude").textContent = `claude mcp add --transport http ${many ? `playground-${state.id}` : "playground"} \\\n  "${url}"`;
+  // One line: a "\\" continuation wraps onto a line of its own in a narrow panel.
+  $("cmd-claude").textContent = `claude mcp add --transport http ${many ? `playground-${state.id}` : "playground"} "${url}"`;
   $("cmd-url").textContent = `${base}/mcp/${state.id}`;
   $("cmd-header").textContent = `Authorization: Bearer ${token}`;
 }
