@@ -90,6 +90,7 @@ export async function startPlayground(target: string, opts: { port?: number; tok
     while (instances.has(id)) id += "-2";
     const events = new Events();
     const state = newState();
+    state.onProgress = () => events.ping("progress");
     instances.set(id, { id, root, state, events, tools: playgroundTools(root, state, (l) => events.add("server", "plan", l)), read: readTools(root) });
   }
   const first = [...instances.values()][0]!;
@@ -194,7 +195,8 @@ export async function startPlayground(target: string, opts: { port?: number; tok
           version: v,
           versions: versions.map((x) => ({ ...x, tally: tally(inst.state.byVersion[x.id] ?? null) })),
           lawsMarkdown: existsSync(lawsFile) ? readFileSync(lawsFile, "utf8") : "",
-          laws: lawViews(inst.root, inst.state.byVersion[v] ?? null),
+          checking: v in inst.state.running,
+          laws: lawViews(inst.root, inst.state.byVersion[v] ?? null, inst.state.running[v]),
           files: files.isError ? [] : files.text.split("\n").filter((f) => f && f !== "(no files)"),
           activity: inst.events.recent(),
         });

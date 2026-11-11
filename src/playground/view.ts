@@ -12,7 +12,7 @@ import { explain, type Explained } from "./explain.ts";
 export interface EnforcerView {
   kind: string;
   path: string;
-  status: "pass" | "fail" | "inconclusive" | null; // null: not run yet
+  status: "pass" | "fail" | "inconclusive" | "running" | null; // null: not run yet
   message: string;
   why: Explained | null; // the message in plain words, for a failure or an inconclusive result
   scope: string | null;
@@ -22,24 +22,36 @@ export interface LawView {
   text: string;
   hash: string;
   // unplanned: not in the lock. unchecked: planned, no check run since the page opened.
-  status: "pass" | "fail" | "inconclusive" | "unplanned" | "unchecked";
+  // running: a check is running and hasn't finished this law yet.
+  status: "pass" | "fail" | "inconclusive" | "unplanned" | "unchecked" | "running";
   enforcers: EnforcerView[];
   proof: string | null; // the break that proved the first enforcer can fail
 }
 
-export function lawViews(root: string, last: LawReport[] | null): LawView[] {
+// `running` is set while a check runs: the laws it has finished so far. Those
+// show their new result; the planned laws it hasn't finished show as running.
+export function lawViews(root: string, last: LawReport[] | null, running?: LawReport[]): LawView[] {
   const lawsFile = join(root, "VERDICT.md");
   const laws = parseLaws(existsSync(lawsFile) ? readFileSync(lawsFile, "utf8") : "");
   const lock = readLock(join(root, "VERDICT.lock"));
   return laws.map((law) => {
     const entry = lock.get(law.hash);
-    const report = last?.find((r) => r.law === law.text);
     let proof: string | null = null;
     try {
       proof = readBreaks(root, law.hash)[0]?.description ?? null;
     } catch {
       // a malformed breaks file is plan's problem, not the page's
     }
+    const done = running?.find((r) => r.law === law.text);
+    if (running && !done && entry?.enforcers.length) {
+      return {
+        ...law,
+        status: "running" as const,
+        proof,
+        enforcers: entry.enforcers.map((e) => ({ kind: e.kind, path: e.path, status: "running" as const, message: "", why: null, scope: scopeOf(root, e.path) })),
+      };
+    }
+    const report = running ? done : last?.find((r) => r.law === law.text);
     if (report && report.status !== "unplanned") {
       return {
         ...law,

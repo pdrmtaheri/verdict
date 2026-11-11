@@ -7,6 +7,7 @@ import { parseLaws } from "../src/laws.ts";
 import { loadManifest, validatePlayground } from "../src/playground/manifest.ts";
 import { discoverPlaygrounds, startPlayground, type Playground } from "../src/playground/server.ts";
 import { checkVersion, newState, playgroundTools } from "../src/playground/tools.ts";
+import { lawViews } from "../src/playground/view.ts";
 import { MAIN, versionList, versionTarget } from "../src/playground/versions.ts";
 import { at } from "../src/where.ts";
 import { repo } from "./helpers.ts";
@@ -61,6 +62,17 @@ test("the same law passes on one version and fails on another, with the same enf
   expect(wrong[0]!.details[0]!.result.message).toContain("does not say 42");
   expect(readFileSync(join(root, "public/answer.txt"), "utf8")).toBe("42\n"); // the real folder is untouched
   await rejectsWith(checkVersion(root, m, "nope"), 'no version "nope"');
+});
+
+test("while a check runs, a finished law shows its result and an unfinished one shows as running", async () => {
+  const root = make();
+  const finished: string[] = [];
+  const report = await checkVersion(root, loadManifest(root), "wrong", (r) => finished.push(r.status));
+  expect(finished).toEqual(["fail"]); // told as each law finishes, with its result
+  expect(lawViews(root, null, [])[0]).toMatchObject({ status: "running", enforcers: [{ status: "running" }] });
+  expect(lawViews(root, null, report)[0]).toMatchObject({ status: "fail", enforcers: [{ status: "fail" }] });
+  // the previous check's result doesn't show through while a new one runs
+  expect(lawViews(root, report, [])[0]!.status).toBe("running");
 });
 
 test("a check on a version points the enforcer at that folder and changes nothing on disk", async () => {

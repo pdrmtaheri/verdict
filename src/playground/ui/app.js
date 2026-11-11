@@ -123,7 +123,9 @@ function lawRow(law, on, index) {
 }
 
 // While a check runs, planned laws and their enforcers read as running; unplanned laws have nothing to run.
-const shown = () => checking
+// Once the server reports the check, it says which laws are still running and has the others' results,
+// so a fast law shows its result without waiting for the slowest one.
+const shown = () => checking && !state.checking
   ? state.laws.map((l) => (l.status === "unplanned" ? l : { ...l, status: "running", enforcers: l.enforcers.map((e) => ({ ...e, status: "running", message: "" })) }))
   : state.laws;
 
@@ -414,7 +416,7 @@ reloadPreview();
 let pending = null;
 new EventSource(`/api/events?token=${encodeURIComponent(token)}&p=${encodeURIComponent(P)}`).onmessage = (m) => {
   const a = JSON.parse(m.data);
-  if (a.id === 0) return;
+  if (a.id === 0) return; // the stream's hello; a ping (id -1) is a law of a running check finishing
   clearTimeout(pending);
   pending = setTimeout(load, 150); // a burst of tool calls reloads once
   if (a.tool === "write_file" && !a.isError && (a.summary.startsWith("public/") || a.summary.startsWith(`versions/${V}/public/`))) reloadPreview();
